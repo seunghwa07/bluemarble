@@ -1,0 +1,1823 @@
+<!DOCTYPE html>
+<html lang="ko" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>부루마블 그랜드 세계여행</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        dark: { 950: '#090d16', 900: '#111827', 800: '#1f2937', 700: '#374151' }
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- FontAwesome & Google Fonts (Inter) -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&display=swap" rel="stylesheet">
+    <!-- Socket.IO Client with automatic fallback & robust reconnection -->
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; user-select: none; }
+        .board-grid { display: grid; grid-template-columns: repeat(11, minmax(0, 1fr)); grid-template-rows: repeat(11, minmax(0, 1fr)); }
+        ::-webkit-scrollbar { width: 5px; height: 5px; }
+        ::-webkit-scrollbar-track { background: rgba(241, 245, 249, 0.6); }
+        ::-webkit-scrollbar-thumb { background: rgba(148, 163, 184, 0.8); border-radius: 4px; }
+        
+        @keyframes doubleBounce {
+            0%, 100% { transform: scale(1) rotate(0deg); }
+            25% { transform: scale(1.2) rotate(-5deg); }
+            75% { transform: scale(1.25) rotate(5deg); }
+        }
+        .animate-double { animation: doubleBounce 0.6s ease-in-out infinite; }
+
+        .bld-pop { transform-box: fill-box; transform-origin: 50% 100%; animation: bldPop .7s cubic-bezier(.2,1.8,.4,1) both; }
+        @keyframes bldPop { from { transform: scale(0) translateY(-12px); opacity: 0; } to { transform: scale(1) translateY(0); opacity: 1; } }
+        .tk-turn { animation: tkBob .9s ease-in-out infinite; }
+        @keyframes tkBob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+
+        /* ===== 더블 안내 (차분한 카드) ===== */
+        .dbl-card { display:flex; align-items:center; gap:12px; background:#fff; border:1px solid #e2e8f0; border-left:4px solid #f59e0b; border-radius:16px; padding:10px 16px 10px 12px; box-shadow:0 10px 30px rgba(15,23,42,.15); animation: dblIn .3s ease-out both; }
+        .dbl-dice { display:flex; gap:6px; }
+        .dbl-die { width:34px; height:34px; border-radius:8px; background:#f8fafc; border:1px solid #cbd5e1; color:#334155; font-size:18px; font-weight:800; display:flex; align-items:center; justify-content:center; }
+        .dbl-eyebrow { font-size:10px; font-weight:700; color:#94a3b8; }
+        .dbl-title { font-size:17px; font-weight:800; color:#0f172a; line-height:1.2; }
+        .dbl-sub { font-size:12px; color:#475569; }
+        .dbl-streak { font-size:11px; font-weight:600; color:#b45309; }
+        @keyframes dblIn { from { opacity:0; transform:translateY(-10px); } to { opacity:1; transform:none; } }
+        .flag-img { display:inline-block; width:clamp(11px,3cqw,20px); height:auto; border-radius:2px; box-shadow:0 0 0 1px rgba(15,23,42,.25); vertical-align:middle; }
+        #board { container-type: inline-size; gap: 2px; }
+        .tile-name { font-size: clamp(7px, 1.75cqw, 12px); line-height: 1.1; font-weight: 900; text-align: center; word-break: break-all; width: 100%; }
+        .tile-price { font-size: clamp(6px, 1.4cqw, 10px); min-height: 1em; line-height: 1; }
+        .tile-icon { font-size: clamp(14px, 4.2cqw, 30px); }
+    </style>
+</head>
+<body class="bg-slate-100 text-slate-800 min-h-screen flex flex-col items-center justify-between p-3 lg:p-6 overflow-x-hidden">
+
+    <!-- Toast Notification Box -->
+    <div id="toast-box" class="fixed top-5 left-1/2 transform -translate-x-1/2 z-50 transition-all duration-300 opacity-0 pointer-events-none">
+        <div id="toast-content" class="bg-white border-2 border-amber-400 shadow-2xl px-5 py-3 rounded-2xl text-sm font-bold text-amber-600 flex items-center gap-2.5">
+            <i class="fa-solid fa-bell text-amber-500"></i> <span id="toast-msg">알림 메시지</span>
+        </div>
+    </div>
+
+    <!-- Double Effect (calm card) -->
+    <div id="double-effect-overlay" class="fixed inset-x-0 top-16 z-50 hidden flex justify-center pointer-events-none px-4">
+        <div class="dbl-card">
+            <div id="dbl-dice" class="dbl-dice"><div id="dbl-die-1" class="dbl-die">6</div><div id="dbl-die-2" class="dbl-die">6</div></div>
+            <div class="text-left">
+                <div id="dbl-eyebrow" class="dbl-eyebrow">보너스 턴</div>
+                <div id="dbl-title" class="dbl-title">더블!</div>
+                <div id="double-count-text" class="dbl-sub">주사위를 한 번 더 굴려요</div>
+                <div id="dbl-streak" class="dbl-streak"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Space Travel Destination Picker Modal -->
+    <div id="space-travel-overlay" class="fixed inset-0 bg-slate-950/50 backdrop-blur-xs z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-white border-4 border-violet-500 max-w-md w-full rounded-3xl p-6 shadow-2xl flex flex-col items-center text-center gap-4">
+            <div class="w-16 h-16 rounded-3xl bg-violet-100 border border-violet-300 flex items-center justify-center text-3xl text-violet-600 shadow-inner">
+                <i class="fa-solid fa-rocket"></i>
+            </div>
+            <div>
+                <div class="text-xs font-bold text-violet-600 tracking-wider uppercase">우주여행 찬스!</div>
+                <h3 class="text-xl font-bold text-slate-900 mt-1">이동할 목적지 도시를 선택하세요</h3>
+            </div>
+            <p class="text-xs text-slate-600 bg-slate-50 p-3 rounded-2xl border border-slate-200 w-full">
+                원하시는 도시나 칸을 클릭하면 즉시 그곳으로 이동합니다. (출발지를 지나면 월급 ₩300 수령!)
+            </p>
+            <div id="space-travel-dest-list" class="grid grid-cols-2 gap-2 w-full max-h-[200px] overflow-y-auto pr-1"></div>
+            <button onclick="closeSpaceTravelModal()" class="w-full bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold py-2.5 rounded-2xl text-xs transition">취소</button>
+        </div>
+    </div>
+
+    <!-- Start / Lobby Screen -->
+    <div id="start-screen" class="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+        <div class="bg-white border border-slate-200 rounded-3xl p-6 lg:p-8 max-w-lg w-full shadow-2xl flex flex-col gap-5 text-center">
+            <div class="flex flex-col items-center gap-2">
+                <div class="w-16 h-16 rounded-3xl bg-amber-100 border border-amber-300 flex items-center justify-center text-3xl text-amber-600 shadow-inner">
+                    <i class="fa-solid fa-earth-americas"></i>
+                </div>
+                <h1 class="text-2xl lg:text-3xl font-black tracking-tight text-slate-900">부루마블 그랜드 세계여행</h1>
+                <p class="text-xs lg:text-sm text-slate-500">전 세계 도시를 누비며 땅을 사고 건물을 지어 최고의 부자가 되어보세요!</p>
+            </div>
+
+            <!-- Mode Selector Tabs -->
+            <div class="grid grid-cols-2 gap-2 bg-slate-100 p-1.5 rounded-2xl border border-slate-200">
+                <button onclick="switchModeTab('local')" id="tab-local" class="py-2.5 rounded-xl font-bold text-xs transition bg-amber-500 text-slate-950 shadow">로컬 멀티 (1기기)</button>
+                <button onclick="switchModeTab('online')" id="tab-online" class="py-2.5 rounded-xl font-bold text-xs transition text-slate-500 hover:text-slate-800">온라인 멀티플레이</button>
+            </div>
+
+            <!-- Local Settings -->
+            <div id="local-settings" class="flex flex-col gap-4 text-left">
+                <div class="flex flex-col gap-1.5">
+                    <label class="text-xs font-bold text-slate-700">참가 인원 설정</label>
+                    <div class="grid grid-cols-3 gap-2">
+                        <button onclick="setPlayerCount(2)" id="pc-2" class="py-2 rounded-xl border border-slate-200 bg-slate-50 text-xs font-bold transition hover:border-slate-400">2인 플레이</button>
+                        <button onclick="setPlayerCount(3)" id="pc-3" class="py-2 rounded-xl border border-slate-200 bg-slate-50 text-xs font-bold transition hover:border-slate-400">3인 플레이</button>
+                        <button onclick="setPlayerCount(4)" id="pc-4" class="py-2 rounded-xl border-2 border-amber-500 bg-amber-50 text-amber-700 text-xs font-bold transition">4인 플레이</button>
+                    </div>
+                </div>
+
+                <div class="flex flex-col gap-2 max-h-[160px] overflow-y-auto pr-1" id="local-player-inputs-container"></div>
+
+                <button onclick="launchLocalGame()" class="w-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black py-3.5 rounded-2xl shadow-xl transition transform active:scale-95 text-sm flex items-center justify-center gap-2 mt-1">
+                    <i class="fa-solid fa-play"></i> 로컬 게임 시작하기
+                </button>
+            </div>
+
+            <!-- Online Settings -->
+            <div id="online-settings" class="flex flex-col gap-4 text-left hidden">
+                <div class="flex flex-col gap-1.5">
+                    <label class="text-xs font-bold text-slate-700">내 닉네임 및 말 모양</label>
+                    <div class="grid grid-cols-2 gap-2">
+                        <input type="text" id="online-pname" placeholder="닉네임 입력" value="여행자" class="bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-amber-500">
+                        <select id="online-ptoken" class="bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-amber-500">
+                            <option value="rocket">🚀 우주선</option>
+                            <option value="plane">✈️ 비행기</option>
+                            <option value="car">🚗 자동차</option>
+                            <option value="ship">⛵ 배</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="flex flex-col gap-1.5">
+                    <label class="text-xs font-bold text-slate-700">Render 서버 URL 주소</label>
+                    <input type="text" id="online-server-url" value="https://bluemarble21.onrender.com" class="bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-amber-500 font-mono">
+                </div>
+
+                <div class="grid grid-cols-2 gap-2">
+                    <button onclick="createOnlineRoom()" class="bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 font-black py-3 rounded-xl shadow-lg text-xs transition flex items-center justify-center gap-1.5">
+                        <i class="fa-solid fa-house-chimney"></i> 방 만들기
+                    </button>
+                    <div class="flex gap-1">
+                        <input type="text" id="online-room-code-input" placeholder="방 코드 (예: BM88)" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-2 py-2.5 text-[11px] text-slate-900 uppercase text-center font-bold tracking-wider focus:outline-none focus:border-amber-500">
+                        <button onclick="joinOnlineRoom()" class="bg-slate-800 hover:bg-slate-700 text-white font-bold px-3 py-2.5 rounded-xl text-xs transition">참가</button>
+                    </div>
+                </div>
+
+                <!-- Waiting Room Area -->
+                <div id="waiting-room-panel" class="hidden flex flex-col gap-3 bg-slate-50 border border-slate-200 rounded-2xl p-3">
+                    <div class="flex justify-between items-center border-b border-slate-200 pb-2">
+                        <span class="text-xs font-bold text-amber-600">대기실 코드: <span id="display-room-code" class="text-slate-900 font-mono text-sm">----</span></span>
+                        <span id="waiting-count" class="text-[10px] bg-slate-200 px-2 py-0.5 rounded-full text-slate-700">1/4명</span>
+                    </div>
+                    <div id="waiting-players-list" class="flex flex-col gap-1.5 max-h-[100px] overflow-y-auto"></div>
+                    <button id="btn-start-socket" onclick="startSocketGameHost()" class="hidden w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 rounded-xl text-xs transition shadow">온라인 게임 시작하기</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Game Header -->
+    <header class="w-full max-w-7xl flex justify-between items-center mb-3 px-2">
+        <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-2xl bg-amber-500/10 border border-amber-500/40 flex items-center justify-center text-amber-600 font-black text-lg shadow-sm">
+                <i class="fa-solid fa-earth-americas"></i>
+            </div>
+            <div>
+                <h1 class="text-base lg:text-lg font-black text-slate-900 tracking-tight">부루마블 그랜드 세계여행</h1>
+                <div class="flex items-center gap-2">
+                    <span id="game-mode-badge" class="text-[10px] bg-slate-200 text-slate-700 px-2 py-0.5 rounded-full font-semibold">로컬 게임</span>
+                    <span id="game-status-banner" class="text-xs font-bold text-amber-700 bg-amber-100 px-3 py-0.5 rounded-full border border-amber-300">대기 중</span>
+                </div>
+            </div>
+        </div>
+        <div class="flex gap-2">
+            <button onclick="openRulesModal()" class="bg-white border border-slate-300 hover:border-slate-400 text-slate-700 text-xs font-bold px-3 py-2 rounded-xl shadow-sm transition flex items-center gap-1.5">
+                <i class="fa-solid fa-book text-amber-500"></i> 게임 규칙
+            </button>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="w-full max-w-7xl grid grid-cols-1 lg:grid-cols-4 gap-4 flex-grow items-start">
+        <div class="lg:col-span-3 bg-white border border-slate-200 rounded-3xl p-3 shadow-xl flex flex-col items-center justify-center relative min-h-[680px]">
+            <div id="board" class="board-grid w-full max-w-[680px] aspect-square bg-slate-100 p-1.5 rounded-2xl border-4 border-slate-300 shadow-inner relative"></div>
+            
+            <!-- Center Dice Animation Popup Modal -->
+            <div id="dice-animation-overlay" class="absolute inset-0 bg-slate-950/40 backdrop-blur-xs z-30 hidden flex items-center justify-center">
+                <div class="bg-white border-2 border-amber-400 px-8 py-6 rounded-3xl shadow-2xl flex flex-col items-center gap-4 animate-bounce">
+                    <div id="dice-anim-title" class="text-xs font-bold text-amber-600 uppercase tracking-widest">주사위 굴리는 중...</div>
+                    <div class="flex gap-4">
+                        <div id="anim-dice-1" class="w-16 h-16 bg-amber-50 border-2 border-amber-500 text-amber-600 rounded-2xl flex items-center justify-center text-3xl font-black shadow">?</div>
+                        <div id="anim-dice-2" class="w-16 h-16 bg-amber-50 border-2 border-amber-500 text-amber-600 rounded-2xl flex items-center justify-center text-3xl font-black shadow">?</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Center Dice Result Confirmation Overlay -->
+            <div id="dice-result-overlay" class="absolute inset-0 bg-slate-950/40 backdrop-blur-xs z-30 hidden flex items-center justify-center">
+                <div class="bg-white border-4 border-amber-400 px-8 py-6 rounded-3xl shadow-2xl flex flex-col items-center gap-3">
+                    <div id="dice-result-title" class="text-xs font-bold text-amber-600 uppercase tracking-widest">주사위 결과 확인</div>
+                    <div class="flex gap-4 my-1">
+                        <div id="res-dice-1" class="w-16 h-16 bg-amber-500 text-white rounded-2xl flex items-center justify-center text-3xl font-black shadow-md">1</div>
+                        <div id="res-dice-2" class="w-16 h-16 bg-amber-500 text-white rounded-2xl flex items-center justify-center text-3xl font-black shadow-md">1</div>
+                    </div>
+                    <div id="res-total-text" class="text-base font-bold text-slate-800">총합: 2 (말 이동 시작)</div>
+                </div>
+            </div>
+
+            <!-- Center Golden Key Popup Modal -->
+            <div id="golden-key-overlay" class="absolute inset-0 bg-slate-950/40 backdrop-blur-xs z-30 hidden flex items-center justify-center p-4">
+                <div class="bg-white border-4 border-yellow-400 max-w-md w-full rounded-3xl p-6 shadow-2xl flex flex-col items-center text-center gap-4">
+                    <div class="w-16 h-16 rounded-3xl bg-yellow-100 border border-yellow-300 flex items-center justify-center text-3xl text-yellow-600 shadow-inner">
+                        <i class="fa-solid fa-key"></i>
+                    </div>
+                    <div>
+                        <div id="gk-header" class="text-xs font-bold text-yellow-600 tracking-wider uppercase">황금열쇠 당첨!</div>
+                        <h3 id="gk-title" class="text-xl font-bold text-slate-900 mt-1">황금열쇠 제목</h3>
+                    </div>
+                    <p id="gk-desc" class="text-sm text-slate-600 bg-slate-50 p-4 rounded-2xl border border-slate-200 w-full">황금열쇠 설명 내용</p>
+                    <button id="gk-btn" onclick="closeGoldenKeyModal()" class="w-full bg-gradient-to-r from-yellow-400 to-amber-500 hover:from-yellow-300 text-slate-950 font-black py-3.5 rounded-2xl shadow-lg transition text-sm">확인 및 수령</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Controls -->
+        <div class="flex flex-col gap-3">
+            <div class="bg-white border border-slate-200 rounded-3xl p-3 shadow-md flex flex-col gap-2.5">
+                <h2 class="text-sm font-bold text-slate-800 border-b border-slate-200 pb-2 flex justify-between items-center">
+                    <span>참가자 현황</span>
+                    <span id="player-count-badge" class="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full font-bold">4인</span>
+                </h2>
+                <div id="player-cards-list" class="flex flex-col gap-2 max-h-[220px] overflow-y-auto pr-1"></div>
+            </div>
+
+            <!-- My Property & Item Cards Inventory -->
+            <div class="bg-white border border-slate-200 rounded-3xl p-3 shadow-md flex flex-col gap-2">
+                <h2 class="text-xs font-bold text-amber-600 uppercase tracking-wider flex justify-between items-center">
+                    <span>내 보유 땅 및 황금열쇠 카드</span>
+                    <span id="my-property-count" class="text-[10px] bg-amber-100 text-amber-800 font-bold px-2 py-0.5 rounded-full">0개</span>
+                </h2>
+                <div id="my-property-inventory" class="flex flex-col gap-1.5 max-h-[160px] overflow-y-auto pr-1">
+                    <div class="text-[11px] text-slate-400 italic text-center py-4">보유한 카드가 없습니다.</div>
+                </div>
+            </div>
+
+            <div class="bg-white border border-slate-200 rounded-3xl p-4 shadow-md flex flex-col gap-3">
+                <div class="flex items-center justify-between">
+                    <div id="current-turn-label" class="text-sm font-bold text-amber-600">현재 차례: 대기 중</div>
+                    <div class="flex space-x-1.5">
+                        <div id="dice-1" class="w-8 h-8 bg-slate-100 border border-slate-300 text-slate-800 rounded-lg flex items-center justify-center text-sm font-black shadow-xs">1</div>
+                        <div id="dice-2" class="w-8 h-8 bg-slate-100 border border-slate-300 text-slate-800 rounded-lg flex items-center justify-center text-sm font-black shadow-xs">1</div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2">
+                    <button id="btn-roll" onclick="rollDice()" class="bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black py-3 px-3 shadow-md transition transform active:scale-95 disabled:opacity-40 disabled:pointer-events-none flex items-center justify-center gap-1.5 text-sm rounded-xl">
+                        <i class="fa-solid fa-dice"></i> 주사위 굴리기
+                    </button>
+                    <button id="btn-end-turn" onclick="endTurn()" class="bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold py-3 px-3 shadow-sm transition transform active:scale-95 disabled:opacity-40 disabled:pointer-events-none flex items-center justify-center gap-1.5 text-sm rounded-xl">
+                        <i class="fa-solid fa-forward"></i> 턴 넘기기
+                    </button>
+                </div>
+            </div>
+
+            <div class="bg-slate-50 border border-slate-200 rounded-3xl p-3 shadow-inner flex flex-col h-32">
+                <div class="text-xs font-bold text-slate-500 mb-1 px-1 flex justify-between items-center">
+                    <span>게임 로그</span>
+                    <button onclick="clearLogs()" class="text-[10px] text-slate-400 hover:text-slate-600">지우기</button>
+                </div>
+                <div id="game-logs" class="flex-grow overflow-y-auto flex flex-col gap-1 text-xs text-slate-600 pr-1">
+                    <div class="text-slate-400 italic">세계 여행을 시작하세요!</div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Modals -->
+    <div id="action-modal" class="fixed inset-0 bg-slate-950/40 backdrop-blur-xs z-40 hidden items-center justify-center p-4">
+        <div class="bg-white border border-slate-200 max-w-sm w-full rounded-3xl p-6 shadow-2xl flex flex-col gap-4 text-center">
+            <div id="modal-icon" class="text-4xl text-amber-500 mb-1"><i class="fa-solid fa-city"></i></div>
+            <h3 id="modal-title" class="text-xl font-bold text-slate-900">타이틀</h3>
+            <p id="modal-desc" class="text-sm text-slate-600">설명</p>
+            <div id="modal-actions" class="grid grid-cols-2 gap-2.5 mt-2 max-h-[260px] overflow-y-auto"></div>
+        </div>
+    </div>
+
+    <div id="property-card-modal" class="fixed inset-0 bg-slate-950/40 backdrop-blur-xs z-40 hidden items-center justify-center p-4">
+        <div class="bg-white border border-slate-200 max-w-sm w-full rounded-3xl p-6 shadow-2xl flex flex-col gap-4">
+            <div class="flex justify-between items-center border-b border-slate-200 pb-3">
+                <h3 id="pc-modal-title" class="text-lg font-bold text-amber-600">자산 카드</h3>
+                <button onclick="closePropertyCardModal()" class="text-slate-400 hover:text-slate-700"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div id="pc-modal-body" class="flex flex-col gap-3 text-xs text-slate-700"></div>
+            <div id="pc-modal-actions" class="grid grid-cols-2 gap-2 mt-2"></div>
+        </div>
+    </div>
+
+    <div id="rules-modal" class="fixed inset-0 bg-slate-950/40 backdrop-blur-xs z-50 hidden items-center justify-center p-4">
+        <div class="bg-white border border-slate-200 max-w-md w-full rounded-3xl p-6 shadow-2xl flex flex-col gap-4">
+            <div class="flex justify-between items-center border-b border-slate-200 pb-3">
+                <h3 class="text-base font-bold text-slate-900"><i class="fa-solid fa-book text-amber-500"></i> 게임 규칙 및 도움말</h3>
+                <button onclick="closeRulesModal()" class="text-slate-400 hover:text-slate-700"><i class="fa-solid fa-xmark text-lg"></i></button>
+            </div>
+            <div class="flex flex-col gap-3 text-xs text-slate-600 max-h-[300px] overflow-y-auto pr-2">
+                <p><strong>1. 주사위 더블:</strong> 같은 눈이 나오면 주사위를 한 번 더 굴릴 수 있습니다. (연속 3번 더블 시 무인도로 강제 이송!)</p>
+                <p><strong>2. 무인도:</strong> 무인도 칸에 도착하면 최대 2회 휴식하며, 주사위 더블이 나오면 즉시 탈출합니다.</p>
+                <p><strong>3. 휴양지 (제주도·하와이·발리·아테네):</strong> 청록색 칸입니다. 무인도 효과는 없고, 땅을 살 수 있지만 건물은 지을 수 없습니다. 통행료는 땅값의 0.5~1.5배로 밟을 때마다 달라집니다.</p>
+                <p><strong>4. 건물 건설 (보드에 실제 건물이 세워집니다):</strong> 2바퀴 이상 완주 후 내 도시에 순서대로 지을 수 있습니다.<br>
+                   🏡 별장 1호 (₩100, 통행료 ×3) → 🏡 별장 2호 (₩100, ×5) → 🏢 빌딩 (₩250, ×9) → 🏨 호텔 (₩400, ×15)<br>
+                   (별장은 최대 2개, 빌딩·호텔은 각 1개)</p>
+                <p><strong>5. 땅 인수:</strong> 상대방 땅에 도착해 통행료를 낸 뒤, (땅값 + 지은 건물 비용) × 2 를 내고 그 땅을 인수할 수 있습니다. 건물은 그대로 넘어옵니다. 휴양지도 인수 가능합니다.</p>
+                <p><strong>6. 황금열쇠:</strong> 상금·벌금, 생일 축하/파티, 🎟️ 우대권(통행료 1회 면제), 무인도 탈출권, 한 번 더 굴리기, 무료 건축 지원, 부동산 호황, 재산세, 태풍 피해, 세금 징수, 앞/뒤로 이동, 휴양지·사회복지기금·우주여행·무인도·파리·뉴욕·서울·도쿄 이동 등 다양한 카드가 나옵니다.</p>
+                <p><strong>7. 땅 판매:</strong> 통행료나 벌금을 낼 돈이 부족하면 내 땅을 은행에 팔아 돈을 마련할 수 있습니다. 판매가는 (땅값 + 건물비)의 70%이며 건물은 사라집니다. 팔 땅이 없거나 포기하면 파산합니다.</p>
+                <p><strong>8. 자동 턴 넘김:</strong> 주사위와 이동, 구매·팝업이 모두 끝나면 잠시 뒤 자동으로 다음 사람의 차례가 됩니다.</p>
+            </div>
+            <button onclick="closeRulesModal()" class="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold py-3 rounded-2xl text-xs transition">확인</button>
+        </div>
+    </div>
+
+    <script>
+        // Total 40 spaces (11 per side: 0~10 bottom, 10~20 left, 20~30 top, 30~39 right)
+        const TOTAL_SPACES = 40;
+
+        // Define 11x11 board layout with exact bright colors & explicit city names
+        const spaceTemplates = [
+            // Bottom Side (Indices 0~9) - Theme: Bright Amber / Orange
+            { id: 0, name: "출발지", type: "start", icon: "fa-flag-checkered", color: "amber", price: 0, rent: 0 },
+            { id: 1, name: "타이베이", type: "city", color: "amber", icon: "fa-mountain-sun", price: 200, rent: 20 },
+            { id: 2, name: "황금열쇠", type: "gold", color: "yellow", icon: "fa-key", price: 0, rent: 0 },
+            { id: 3, name: "베이징", type: "city", color: "amber", icon: "fa-archway", price: 220, rent: 22 },
+            { id: 4, name: "마닐라", type: "city", color: "amber", icon: "fa-umbrella-beach", price: 240, rent: 24 },
+            { id: 5, name: "제주도", type: "island", color: "cyan", icon: "fa-plane-departure", price: 300, rent: 30 },
+            { id: 6, name: "싱가포르", type: "city", color: "amber", icon: "fa-hotel", price: 280, rent: 28 },
+            { id: 7, name: "황금열쇠", type: "gold", color: "yellow", icon: "fa-key", price: 0, rent: 0 },
+            { id: 8, name: "카이로", type: "city", color: "amber", icon: "fa-pyramid", price: 300, rent: 30 },
+            { id: 9, name: "홍콩", type: "city", color: "amber", icon: "fa-city", price: 320, rent: 32 },
+            
+            // Left Side (Indices 10~19) - Theme: Bright Emerald / Green
+            { id: 10, name: "무인도", type: "corner_island", color: "indigo", icon: "fa-anchor", price: 0, rent: 0 },
+            { id: 11, name: "방콕", type: "city", color: "emerald", icon: "fa-landmark", price: 350, rent: 35 },
+            { id: 12, name: "황금열쇠", type: "gold", color: "yellow", icon: "fa-key", price: 0, rent: 0 },
+            { id: 13, name: "취리히", type: "city", color: "emerald", icon: "fa-mountain", price: 380, rent: 38 },
+            { id: 14, name: "베를린", type: "city", color: "emerald", icon: "fa-chess-rook", price: 400, rent: 40 },
+            { id: 15, name: "하와이", type: "island", color: "cyan", icon: "fa-umbrella-beach", price: 350, rent: 35 },
+            { id: 16, name: "로마", type: "city", color: "emerald", icon: "fa-monument", price: 420, rent: 42 },
+            { id: 17, name: "황금열쇠", type: "gold", color: "yellow", icon: "fa-key", price: 0, rent: 0 },
+            { id: 18, name: "프라하", type: "city", color: "emerald", icon: "fa-archway", price: 430, rent: 43 },
+            { id: 19, name: "파리", type: "city", color: "emerald", icon: "fa-tower-observation", price: 450, rent: 45 },
+
+            // Top Side (Indices 20~29) - Theme: Bright Sky / Blue
+            { id: 20, name: "우주여행", type: "corner_space", color: "violet", icon: "fa-rocket", price: 0, rent: 0 },
+            { id: 21, name: "런던", type: "city", color: "sky", icon: "fa-bridge", price: 500, rent: 50 },
+            { id: 22, name: "황금열쇠", type: "gold", color: "yellow", icon: "fa-key", price: 0, rent: 0 },
+            { id: 23, name: "뉴욕", type: "city", color: "sky", icon: "fa-building-columns", price: 550, rent: 55 },
+            { id: 24, name: "시드니", type: "city", color: "sky", icon: "fa-water", price: 520, rent: 52 },
+            { id: 25, name: "발리", type: "island", color: "cyan", icon: "fa-umbrella-beach", price: 400, rent: 40 },
+            { id: 26, name: "부산", type: "city", color: "sky", icon: "fa-ship", price: 480, rent: 48 },
+            { id: 27, name: "황금열쇠", type: "gold", color: "yellow", icon: "fa-key", price: 0, rent: 0 },
+            { id: 28, name: "니스", type: "city", color: "sky", icon: "fa-sun", price: 540, rent: 54 },
+            { id: 29, name: "서울", type: "city", color: "sky", icon: "fa-tower-broadcast", price: 600, rent: 60 },
+
+            // Right Side (Indices 30~39) - Theme: Bright Rose / Red
+            { id: 30, name: "사회복지기금", type: "corner_welfare", color: "pink", icon: "fa-hand-holding-heart", price: 0, rent: 0 },
+            { id: 31, name: "도쿄", type: "city", color: "rose", icon: "fa-torii-gate", price: 500, rent: 50 },
+            { id: 32, name: "황금열쇠", type: "gold", color: "yellow", icon: "fa-key", price: 0, rent: 0 },
+            { id: 33, name: "토론토", type: "city", color: "rose", icon: "fa-leaf", price: 460, rent: 46 },
+            { id: 34, name: "상하이", type: "city", color: "rose", icon: "fa-building", price: 480, rent: 48 },
+            { id: 35, name: "아테네", type: "island", color: "cyan", icon: "fa-gopuram", price: 380, rent: 38 },
+            { id: 36, name: "리오", type: "city", color: "rose", icon: "fa-sun", price: 520, rent: 52 },
+            { id: 37, name: "황금열쇠", type: "gold", color: "yellow", icon: "fa-key", price: 0, rent: 0 },
+            { id: 38, name: "마드리드", type: "city", color: "rose", icon: "fa-volcano", price: 530, rent: 53 },
+            { id: 39, name: "부에노스아이레스", type: "city", color: "rose", icon: "fa-earth-americas", price: 550, rent: 55 }
+        ];
+
+        // ===== 국기 (flagcdn 이미지) =====
+        const CITY_FLAGS = {1:'tw',3:'cn',4:'ph',5:'kr',6:'sg',8:'eg',9:'hk',11:'th',13:'ch',14:'de',15:'us',16:'it',18:'cz',19:'fr',21:'gb',23:'us',24:'au',25:'id',26:'kr',28:'fr',29:'kr',31:'jp',33:'ca',34:'cn',35:'gr',36:'br',38:'es',39:'ar'};
+        function flagHtml(id, w) {
+            const c = CITY_FLAGS[id]; if (!c) return '';
+            return `<img class="flag-img" ${w ? `style="width:${w}px"` : ''} src="https://flagcdn.com/w40/${c}.png" srcset="https://flagcdn.com/w80/${c}.png 2x" alt="" onerror="this.style.display='none'">`;
+        }
+
+        // ===== 건물 단계 (별장 최대 2개 → 빌딩 1개 → 호텔 1개) =====
+        // buildings 값은 '현재 건설 단계'(0~4)를 의미합니다.
+        const BUILD_STAGES = [
+            { label: '대지',   mult: 1, cost: 0 },
+            { label: '별장 1호', mult: 3, cost: 100 },
+            { label: '별장 2호', mult: 5, cost: 100 },
+            { label: '빌딩',   mult: 9, cost: 250 },
+            { label: '호텔',   mult: 15, cost: 400 }
+        ];
+        const MAX_STAGE = BUILD_STAGES.length - 1;
+
+        function buildingIcons(stage) {
+            let s = '🏡'.repeat(Math.min(stage, 2));
+            if (stage >= 3) s += '🏢';
+            if (stage >= 4) s += '🏨';
+            return s;
+        }
+        function cityToll(space, info) {
+            const st = Math.min((info && info.buildings) || 0, MAX_STAGE);
+            return space.rent * BUILD_STAGES[st].mult;
+        }
+        // 휴양지 통행료: 땅값의 0.5 ~ 1.5배 (밟을 때마다 변동)
+        function resortRange(space) {
+            return [Math.round(space.price * 0.5 / 10) * 10, Math.round(space.price * 1.5 / 10) * 10];
+        }
+        function rollResortToll(space) {
+            const mult = 0.5 + Math.random();
+            return { mult, fee: Math.round(space.price * mult / 10) * 10 };
+        }
+
+        // ===== 말(토큰) 모양 =====
+        const TOKEN_SHAPES = {
+            rocket: { icon: 'fa-rocket', name: '우주선', emoji: '🚀' },
+            plane:  { icon: 'fa-plane',  name: '비행기', emoji: '✈️' },
+            car:    { icon: 'fa-car',    name: '자동차', emoji: '🚗' },
+            ship:   { icon: 'fa-ship',   name: '배',     emoji: '⛵' }
+        };
+        const DEFAULT_SHAPE_ORDER = ['rocket', 'plane', 'car', 'ship'];
+        let tokenShapes = {}; // { 플레이어id: 'rocket' | 'plane' | 'car' | 'ship' }
+        function shapeOf(id) {
+            const k = tokenShapes[id];
+            return TOKEN_SHAPES[k] || TOKEN_SHAPES[DEFAULT_SHAPE_ORDER[id % 4]];
+        }
+        function tokenIconHtml(id) { return `<i class="fa-solid ${shapeOf(id).icon}"></i>`; }
+
+        // ===== 보드 위에 실제로 세워지는 건물 그래픽 =====
+        const OWNER_HEX = ['#ec4899', '#166534', '#8b5a2b', '#171717'];
+        let justBuilt = null; // 방금 지은 건물 (등장 애니메이션용)
+        function buildingSvg(stage, hex, animLast) {
+            const dk = '#1e293b';
+            const pop = k => (animLast && k === stage) ? ' class="bld-pop"' : '';
+            const house = (x, k) => `<g${pop(k)}><rect x="${x}" y="17" width="12" height="10" fill="#fff" stroke="${dk}" stroke-width="1"/><polygon points="${x - 1.5},17.5 ${x + 6},8.5 ${x + 13.5},17.5" fill="#dc2626" stroke="${dk}" stroke-width="1" stroke-linejoin="round"/><rect x="${x + 4.5}" y="21" width="3" height="6" fill="#92400e"/><rect x="${x + 1.5}" y="19.5" width="2" height="2" fill="#fde68a"/><rect x="${x + 8.5}" y="19.5" width="2" height="2" fill="#fde68a"/></g>`;
+            let g = '<rect x="0" y="26.5" width="64" height="1.5" rx=".7" fill="#bef264"/>';
+            if (stage >= 1) g += house(1, 1);
+            if (stage >= 2) g += house(14, 2);
+            if (stage >= 3) {
+                let w = '';
+                for (let r = 0; r < 5; r++) w += `<rect x="29.2" y="${4 + r * 4.6}" width="2.6" height="2.8" fill="#38bdf8"/><rect x="34.2" y="${4 + r * 4.6}" width="2.6" height="2.8" fill="#38bdf8"/>`;
+                g += `<g${pop(3)}><rect x="27" y="1.5" width="12" height="25" fill="#e2e8f0" stroke="${dk}" stroke-width="1"/>${w}<line x1="33" y1="1.5" x2="33" y2="-0.5" stroke="${dk}" stroke-width="1"/></g>`;
+            }
+            if (stage >= 4) {
+                let w = '';
+                for (let r = 0; r < 2; r++) for (let c = 0; c < 4; c++) w += `<rect x="${43 + c * 4.6}" y="${12 + r * 5}" width="2.8" height="3" fill="#38bdf8"/>`;
+                g += `<g${pop(4)}><rect x="41" y="8.5" width="22" height="18" fill="#f1f5f9" stroke="${dk}" stroke-width="1"/><rect x="43" y="3" width="18" height="5.5" rx="1" fill="#fde047" stroke="${dk}" stroke-width="1"/><text x="52" y="7.3" font-size="4.6" font-weight="900" text-anchor="middle" fill="${dk}" font-family="sans-serif">HOTEL</text>${w}<rect x="49.5" y="21" width="5" height="5.5" fill="${dk}"/></g>`;
+            }
+            return `<svg viewBox="0 -1 64 29" class="w-full h-full" preserveAspectRatio="xMidYMax meet" xmlns="http://www.w3.org/2000/svg">${g}</svg>`;
+        }
+
+        // ===== 땅 인수 / 우대권 / 황금열쇠 이동 =====
+        const TAKEOVER_MULT = 2; // 인수 비용 = (땅값 + 건물비용) × 2
+        let pendingAction = false; // 황금열쇠 이동 등 예약된 행동이 있는 동안 주사위/턴종료 잠금
+
+        function propertyValue(spaceId) {
+            const sp = spaceTemplates[spaceId], info = propertyOwners[spaceId];
+            let v = sp.price;
+            if (sp.type === 'city' && info) for (let i = 1; i <= (info.buildings || 0); i++) v += BUILD_STAGES[i].cost;
+            return v;
+        }
+        function takeoverCost(spaceId) { return propertyValue(spaceId) * TAKEOVER_MULT; }
+
+        function offerTakeover(player, spaceId) {
+            const info = propertyOwners[spaceId];
+            if (!info || player.bankrupt || info.ownerId === player.id) return;
+            const sp = spaceTemplates[spaceId];
+            const owner = players.find(p => p.id === info.ownerId);
+            const cost = takeoverCost(spaceId);
+            if (player.money < cost) { addLog(`💡 ${sp.name} 인수 비용은 ₩${cost}입니다. (자금 부족)`); return; }
+            const bld = sp.type === 'city' ? `${buildingIcons(info.buildings) || '🌱'} ${BUILD_STAGES[info.buildings].label}` : '🌴 휴양지';
+            openActionModal(
+                `🏷️ 땅 인수: ${sp.name}`,
+                `${owner ? owner.name : '상대'}님의 땅을 인수할 수 있습니다.<br>현재 상태: ${bld}<br>가치 ₩${propertyValue(spaceId)} × ${TAKEOVER_MULT} = <b>₩${cost}</b><br>(건물은 그대로 인수됩니다)`,
+                [
+                    { text: `인수하기 (₩${cost})`, bg: 'bg-rose-500 hover:bg-rose-400 text-white', action: () => takeoverProperty(player, spaceId) },
+                    { text: '인수 안 함', bg: 'bg-slate-200 hover:bg-slate-300 text-slate-800', action: closeModal }
+                ]
+            );
+        }
+
+        function takeoverProperty(player, spaceId) {
+            const info = propertyOwners[spaceId];
+            const sp = spaceTemplates[spaceId];
+            if (!info || info.ownerId === player.id) { closeModal(); return; }
+            const cost = takeoverCost(spaceId);
+            if (player.money < cost) { showToast('자금이 부족합니다.'); closeModal(); return; }
+            const owner = players.find(p => p.id === info.ownerId);
+            player.money -= cost;
+            if (owner) {
+                owner.money += cost;
+                owner.properties = (owner.properties || []).filter(id => id !== spaceId);
+            }
+            if (!player.properties) player.properties = [];
+            if (!player.properties.includes(spaceId)) player.properties.push(spaceId);
+            info.ownerId = player.id;
+            addLog(`🏷️ ${player.name}님이 ${owner ? owner.name : '상대'}님의 [${sp.name}]을(를) ₩${cost}에 인수했습니다!`);
+            showToast(`🏷️ ${sp.name} 인수 완료!`);
+            closeModal();
+            renderBoard();
+            updatePlayerCardsUI();
+            updateInventoryUI();
+        }
+
+        // 우대권: 통행료를 내야 할 때 사용 여부를 직접 선택 (면제 1회)
+        function hasVoucher(player) {
+            return (inventoryCards[player.id] || []).some(c => c.name === '우대권');
+        }
+        function useVoucher(player) {
+            const inv = inventoryCards[player.id] || [];
+            const idx = inv.findIndex(c => c.name === '우대권');
+            if (idx < 0) return false;
+            inv.splice(idx, 1);
+            return true;
+        }
+        // 통행료 정산: 우대권이 있으면 사용할지 물어봄
+        // ===== 땅 판매: 돈이 모자라면 땅을 은행에 팔아 마련 =====
+        const SELL_RATE = 0.7; // 판매가 = (땅값 + 건물비) × 70%
+        function sellPrice(id) { return Math.round(propertyValue(id) * SELL_RATE / 10) * 10; }
+        function sellProperty(player, id) {
+            const sp = spaceTemplates[id], price = sellPrice(id);
+            player.money += price;
+            player.properties = (player.properties || []).filter(x => x !== id);
+            delete propertyOwners[id];
+            addLog(`🏷️ ${player.name}님이 [${sp.name}]을(를) 은행에 ₩${price}에 팔았습니다.`);
+            renderBoard();
+        }
+        function declareBankrupt(player, owner) {
+            if (owner && player.money > 0) owner.money += player.money;
+            player.money = 0; player.bankrupt = true;
+            (player.properties || []).forEach(id => delete propertyOwners[id]);
+            player.properties = [];
+            addLog(`💀 ${player.name}님이 파산했습니다!`);
+            showToast(`💀 ${player.name} 파산!`);
+            renderBoard();
+            setTimeout(checkGameOver, 0);
+        }
+        // amount를 낼 수 있으면 바로 지불, 모자라면 땅 판매 창을 띄움
+        function chargePlayer(player, amount, owner, payLog, onDone) {
+            const done = () => { updatePlayerCardsUI(); updateInventoryUI(); if (onDone) onDone(); };
+            const pay = () => { player.money -= amount; if (owner) owner.money += amount; if (payLog) addLog(payLog); done(); };
+            const giveUp = () => { closeModal(); declareBankrupt(player, owner); done(); };
+            if (player.money >= amount) { pay(); return; }
+            const render = () => {
+                if (player.money >= amount) { closeModal(); pay(); return; }
+                const props = player.properties || [];
+                if (!props.length) { giveUp(); return; }
+                const acts = props.map(id => ({ text: `${spaceTemplates[id].name} 판매 +₩${sellPrice(id)}`, bg: 'bg-amber-500 hover:bg-amber-400 text-slate-950', action: () => { sellProperty(player, id); render(); } }));
+                acts.push({ text: '포기하고 파산', bg: 'bg-slate-200 hover:bg-slate-300 text-slate-800', full: true, action: giveUp });
+                openActionModal('💸 자금 부족: 땅을 팔아야 해요',
+                    `내야 할 금액 <b>₩${amount}</b> / 보유 <b>₩${player.money}</b><br>부족한 금액 <b class="text-red-600">₩${amount - player.money}</b><br><span class="text-slate-500">땅은 (땅값+건물비)의 ${Math.round(SELL_RATE * 100)}%에 은행이 사 가며, 건물은 사라집니다.</span>`, acts);
+            };
+            render();
+        }
+        // 통행료 정산: 우대권이 있으면 사용할지 물어봄
+        function settleToll(player, owner, fee, payLog, spaceId) {
+            const finish = () => { updatePlayerCardsUI(); updateInventoryUI(); offerTakeover(player, spaceId); };
+            const pay = () => chargePlayer(player, fee, owner, payLog, finish);
+            if (!hasVoucher(player)) { pay(); return; }
+            openActionModal(
+                '🎟️ 우대권 사용',
+                `통행료 <b>₩${fee}</b>를 내야 합니다.<br>우대권을 사용하면 이번 통행료를 면제받습니다.<br><span class="text-slate-500">(사용하지 않으면 우대권은 계속 보관됩니다)</span>`,
+                [
+                    { text: '우대권 사용 (면제)', bg: 'bg-emerald-500 hover:bg-emerald-400 text-white', action: () => {
+                        useVoucher(player);
+                        addLog(`🎟️ ${player.name}님이 우대권을 사용하여 통행료 ₩${fee}를 면제받았습니다!`);
+                        showToast('🎟️ 우대권 사용! 통행료 면제');
+                        closeModal(); finish();
+                    } },
+                    { text: `사용 안 함 (₩${fee} 지불)`, bg: 'bg-slate-200 hover:bg-slate-300 text-slate-800', action: () => { closeModal(); pay(); } }
+                ]
+            );
+        }
+
+        // 황금열쇠 이동 등 예약된 행동이 있는 동안 주사위/턴종료 잠금
+
+        function propertyValue(spaceId) {
+            const sp = spaceTemplates[spaceId], info = propertyOwners[spaceId];
+            let v = sp.price;
+            if (sp.type === 'city' && info) for (let i = 1; i <= (info.buildings || 0); i++) v += BUILD_STAGES[i].cost;
+            return v;
+        }
+        function takeoverCost(spaceId) { return propertyValue(spaceId) * TAKEOVER_MULT; }
+
+        function offerTakeover(player, spaceId) {
+            const info = propertyOwners[spaceId];
+            if (!info || player.bankrupt || info.ownerId === player.id) return;
+            const sp = spaceTemplates[spaceId];
+            const owner = players.find(p => p.id === info.ownerId);
+            const cost = takeoverCost(spaceId);
+            if (player.money < cost) { addLog(`💡 ${sp.name} 인수 비용은 ₩${cost}입니다. (자금 부족)`); return; }
+            const bld = sp.type === 'city' ? `${buildingIcons(info.buildings) || '🌱'} ${BUILD_STAGES[info.buildings].label}` : '🌴 휴양지';
+            openActionModal(
+                `🏷️ 땅 인수: ${sp.name}`,
+                `${owner ? owner.name : '상대'}님의 땅을 인수할 수 있습니다.<br>현재 상태: ${bld}<br>가치 ₩${propertyValue(spaceId)} × ${TAKEOVER_MULT} = <b>₩${cost}</b><br>(건물은 그대로 인수됩니다)`,
+                [
+                    { text: `인수하기 (₩${cost})`, bg: 'bg-rose-500 hover:bg-rose-400 text-white', action: () => takeoverProperty(player, spaceId) },
+                    { text: '인수 안 함', bg: 'bg-slate-200 hover:bg-slate-300 text-slate-800', action: closeModal }
+                ]
+            );
+        }
+
+        function takeoverProperty(player, spaceId) {
+            const info = propertyOwners[spaceId];
+            const sp = spaceTemplates[spaceId];
+            if (!info || info.ownerId === player.id) { closeModal(); return; }
+            const cost = takeoverCost(spaceId);
+            if (player.money < cost) { showToast('자금이 부족합니다.'); closeModal(); return; }
+            const owner = players.find(p => p.id === info.ownerId);
+            player.money -= cost;
+            if (owner) {
+                owner.money += cost;
+                owner.properties = (owner.properties || []).filter(id => id !== spaceId);
+            }
+            if (!player.properties) player.properties = [];
+            if (!player.properties.includes(spaceId)) player.properties.push(spaceId);
+            info.ownerId = player.id;
+            addLog(`🏷️ ${player.name}님이 ${owner ? owner.name : '상대'}님의 [${sp.name}]을(를) ₩${cost}에 인수했습니다!`);
+            showToast(`🏷️ ${sp.name} 인수 완료!`);
+            closeModal();
+            renderBoard();
+            updatePlayerCardsUI();
+            updateInventoryUI();
+        }
+
+        // 우대권: 통행료를 내야 할 때 사용 여부를 직접 선택 (면제 1회)
+        function hasVoucher(player) {
+            return (inventoryCards[player.id] || []).some(c => c.name === '우대권');
+        }
+        function useVoucher(player) {
+            const inv = inventoryCards[player.id] || [];
+            const idx = inv.findIndex(c => c.name === '우대권');
+            if (idx < 0) return false;
+            inv.splice(idx, 1);
+            return true;
+        }
+        // 통행료 정산: 우대권이 있으면 사용할지 물어봄
+        function settleToll(player, owner, fee, payLog, spaceId) {
+            const pay = () => {
+                player.money -= fee;
+                if (owner) owner.money += fee;
+                addLog(payLog);
+                checkBankrupt(player);
+            };
+            const finish = () => { updatePlayerCardsUI(); updateInventoryUI(); offerTakeover(player, spaceId); };
+            if (!hasVoucher(player)) { pay(); finish(); return; }
+            openActionModal(
+                '🎟️ 우대권 사용',
+                `통행료 <b>₩${fee}</b>를 내야 합니다.<br>우대권을 사용하면 이번 통행료를 면제받습니다.<br><span class="text-slate-500">(사용하지 않으면 우대권은 계속 보관됩니다)</span>`,
+                [
+                    { text: '우대권 사용 (면제)', bg: 'bg-emerald-500 hover:bg-emerald-400 text-white', action: () => {
+                        useVoucher(player);
+                        addLog(`🎟️ ${player.name}님이 우대권을 사용하여 통행료 ₩${fee}를 면제받았습니다!`);
+                        showToast('🎟️ 우대권 사용! 통행료 면제');
+                        closeModal(); finish();
+                    } },
+                    { text: `사용 안 함 (₩${fee} 지불)`, bg: 'bg-slate-200 hover:bg-slate-300 text-slate-800', action: () => { pay(); closeModal(); finish(); } }
+                ]
+            );
+        }
+
+        // 황금열쇠 이동: 연출을 잠깐 보여준 뒤 이동 → 도착 칸 효과 실행
+        function keyMove(player, dest, passSalary) {
+            pendingAction = true;
+            setTimeout(() => {
+                pendingAction = false;
+                closeGoldenKeyModal();
+                if (!gameActive || player.bankrupt) return;
+                if (passSalary && dest < player.position) {
+                    player.laps++;
+                    player.money += 300;
+                    addLog(`🏁 ${player.name}님이 출발지를 지나며 월급 ₩300을 수령했습니다! (총 ${player.laps}바퀴 완주)`);
+                }
+                player.position = dest;
+                addLog(`➡️ ${player.name}님이 [${spaceTemplates[dest].name}] 칸으로 이동했습니다.`);
+                renderPlayerTokens();
+                handleSpaceAction(player);
+            }, 1800);
+        }
+
+        // ===== 온라인 연출 동기화 (log 채널로 상대에게 전달) =====
+        const FX_PREFIX = '@@FX@@';
+        function sendFx(type, data) {
+            if (gameMode !== 'online' || isRemote || !socket || !socket.connected) return;
+            try { socket.emit('log', FX_PREFIX + JSON.stringify({ t: type, d: data, from: myId })); } catch (e) {}
+        }
+        let remoteDiceTimer = null, remoteDiceSafety = null, gkRemote = false, gkRemoteTimer = null;
+        function stopRemoteDice() {
+            clearInterval(remoteDiceTimer); clearTimeout(remoteDiceSafety);
+            const a = document.getElementById('dice-animation-overlay'); if (a) a.classList.add('hidden');
+        }
+        function handleFx(fx) {
+            if (!fx || fx.from === myId) return;
+            const d = fx.d || {};
+            if (fx.t === 'token') {
+                tokenShapes[d.id] = d.shape;
+                if (document.getElementById('tile-0')) renderPlayerTokens();
+                return;
+            }
+            if (!gameActive) return;
+            if (fx.t === 'dice_start') {
+                stopRemoteDice();
+                document.getElementById('dice-anim-title').innerText = `${d.name}님이 주사위 굴리는 중...`;
+                document.getElementById('dice-animation-overlay').classList.remove('hidden');
+                remoteDiceTimer = setInterval(() => {
+                    document.getElementById('anim-dice-1').innerText = Math.floor(Math.random() * 6) + 1;
+                    document.getElementById('anim-dice-2').innerText = Math.floor(Math.random() * 6) + 1;
+                }, 80);
+                remoteDiceSafety = setTimeout(stopRemoteDice, 4000);
+            } else if (fx.t === 'dice_result') {
+                stopRemoteDice();
+                showDiceResultOverlay(d.d1, d.d2, d.d1 === d.d2, `${d.name}님의 주사위${d.island ? ' (무인도)' : ''}`);
+            } else if (fx.t === 'double') {
+                const o = Object.assign({}, d.opts || {}, { _remote: true });
+                if (!o.sub) o.sub = `🎲 ${d.who}님이 한 번 더 굴립니다!`;
+                showDoubleEffect(d.msg, o);
+            } else if (fx.t === 'key') {
+                showGoldenKeyOverlay(d.name, d.desc, d.who);
+            }
+        }
+        function showDiceResultOverlay(d1, d2, isDouble, title) {
+            document.getElementById('dice-result-title').innerText = title || '주사위 결과 확인';
+            document.getElementById('res-dice-1').innerText = d1;
+            document.getElementById('res-dice-2').innerText = d2;
+            document.getElementById('res-total-text').innerText = `총합: ${d1 + d2} ${isDouble ? '(더블!)' : ''}`;
+            const ov = document.getElementById('dice-result-overlay');
+            ov.classList.remove('hidden');
+            if (title) setTimeout(() => ov.classList.add('hidden'), 1500); // 상대 화면은 자동으로 닫힘
+        }
+        function showGoldenKeyOverlay(name, desc, who) {
+            gkRemote = !!who;
+            document.getElementById('gk-header').innerText = who ? `${who}님이 황금열쇠를 뽑았습니다!` : '황금열쇠 당첨!';
+            document.getElementById('gk-title').innerText = name;
+            document.getElementById('gk-desc').innerText = desc;
+            document.getElementById('gk-btn').innerText = who ? '확인' : '확인 및 수령';
+            document.getElementById('golden-key-overlay').classList.remove('hidden');
+            clearTimeout(gkRemoteTimer);
+            if (who) gkRemoteTimer = setTimeout(() => { if (gkRemote) closeGoldenKeyModal(); }, 4500);
+        }
+
+        // Game State Variables
+        let gameMode = 'local';
+        let playerCount = 4;
+        let players = [];
+        let currentTurn = 0;
+        let gameActive = false;
+        let diceRolledThisTurn = false;
+        let doubleStreak = 0; // Tracks consecutive double dice rolls
+        let globalTurnCount = 0;
+        let propertyOwners = {};
+        let inventoryCards = {};
+
+        const tokenColors = [
+            { bg: 'bg-pink-500', text: 'text-pink-600', border: 'border-pink-500', tileBg: 'bg-pink-500 border-pink-800 text-white', name: '핑크' },
+            { bg: 'bg-green-800', text: 'text-green-800', border: 'border-green-800', tileBg: 'bg-green-800 border-green-950 text-white', name: '짙은 초록' },
+            { bg: 'bg-[#8b5a2b]', text: 'text-[#8b5a2b]', border: 'border-[#8b5a2b]', tileBg: 'bg-[#8b5a2b] border-[#4a2c10] text-white', name: '갈색' },
+            { bg: 'bg-neutral-900', text: 'text-neutral-900', border: 'border-neutral-900', tileBg: 'bg-neutral-900 border-black text-white', name: '검정' }
+        ];
+
+        window.onload = function() {
+            if (location.hostname.endsWith('onrender.com')) document.getElementById('online-server-url').value = location.origin;
+            initLocalInputs();
+            renderBoard();
+        };
+
+        function launchLocalGame() {
+            players = [];
+            for (let i = 0; i < playerCount; i++) {
+                const nameInput = document.getElementById(`local-pname-${i}`);
+                const pName = nameInput && nameInput.value.trim() ? nameInput.value.trim() : `플레이어 ${i+1}`;
+                players.push({
+                    id: i,
+                    name: pName,
+                    money: 4000,
+                    position: 0,
+                    laps: 0,
+                    properties: [],
+                    isIsland: false,
+                    islandTurns: 0,
+                    bankrupt: false
+                });
+            }
+
+            tokenShapes = {};
+            for (let i = 0; i < playerCount; i++) {
+                const sel = document.getElementById(`local-ptoken-${i}`);
+                tokenShapes[i] = sel ? sel.value : DEFAULT_SHAPE_ORDER[i];
+            }
+
+            gameMode = 'local';
+            gameActive = true;
+            currentTurn = 0;
+            globalTurnCount = 0;
+            propertyOwners = {};
+            inventoryCards = {};
+
+            const startScreen = document.getElementById('start-screen');
+            if (startScreen) startScreen.classList.add('hidden');
+
+            const modeBadge = document.getElementById('game-mode-badge');
+            if (modeBadge) modeBadge.innerText = '로컬 멀티 게임';
+
+            const statusBanner = document.getElementById('game-status-banner');
+            if (statusBanner) statusBanner.innerText = '게임 진행 중';
+
+            renderBoard();
+            addLog(`🚀 게임이 시작되었습니다! ${players[0].name}님의 차례입니다.`);
+        }
+
+        function switchModeTab(mode) {
+            gameMode = mode;
+            if (mode === 'local') {
+                document.getElementById('tab-local').className = "py-2.5 rounded-xl font-bold text-xs transition bg-amber-500 text-slate-950 shadow";
+                document.getElementById('tab-online').className = "py-2.5 rounded-xl font-bold text-xs transition text-slate-500 hover:text-slate-800";
+                document.getElementById('local-settings').classList.remove('hidden');
+                document.getElementById('online-settings').classList.add('hidden');
+            } else {
+                document.getElementById('tab-online').className = "py-2.5 rounded-xl font-bold text-xs transition bg-amber-500 text-slate-950 shadow";
+                document.getElementById('tab-local').className = "py-2.5 rounded-xl font-bold text-xs transition text-slate-500 hover:text-slate-800";
+                document.getElementById('online-settings').classList.remove('hidden');
+                document.getElementById('local-settings').classList.add('hidden');
+            }
+        }
+
+        function setPlayerCount(count) {
+            playerCount = count;
+            for (let i = 2; i <= 4; i++) {
+                const btn = document.getElementById(`pc-${i}`);
+                if (btn) {
+                    if (i === count) {
+                        btn.className = "py-2 rounded-xl border-2 border-amber-500 bg-amber-50 text-amber-700 text-xs font-bold transition";
+                    } else {
+                        btn.className = "py-2 rounded-xl border border-slate-200 bg-slate-50 text-xs font-bold transition hover:border-slate-400";
+                    }
+                }
+            }
+            initLocalInputs();
+            const badge = document.getElementById('player-count-badge');
+            if (badge) badge.innerText = `${count}인`;
+        }
+
+        function initLocalInputs() {
+            const container = document.getElementById('local-player-inputs-container');
+            if (!container) return;
+            container.innerHTML = '';
+            for (let i = 0; i < playerCount; i++) {
+                container.innerHTML += `
+                    <div class="flex items-center gap-2">
+                        <span class="w-6 h-6 shrink-0 rounded-full ${tokenColors[i].bg} text-white font-bold flex items-center justify-center text-[10px] shadow-xs">${i+1}</span>
+                        <input type="text" id="local-pname-${i}" value="플레이어 ${i+1}" class="flex-grow min-w-0 bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-amber-500">
+                        <select id="local-ptoken-${i}" class="bg-slate-50 border border-slate-300 rounded-xl px-1.5 py-2 text-xs text-slate-900 focus:outline-none focus:border-amber-500">
+                            ${Object.keys(TOKEN_SHAPES).map(k => `<option value="${k}" ${k === DEFAULT_SHAPE_ORDER[i] ? 'selected' : ''}>${TOKEN_SHAPES[k].emoji} ${TOKEN_SHAPES[k].name}</option>`).join('')}
+                        </select>
+                    </div>
+                `;
+            }
+        }
+
+        // Render 11x11 Board Grid (Bright Light Palette)
+        function renderBoard() {
+            const boardEl = document.getElementById('board');
+            if (!boardEl) return;
+            boardEl.innerHTML = '';
+
+            const sideThemeStyles = {
+                amber: "bg-amber-50/90 border-amber-300 text-amber-950 hover:bg-amber-100",
+                emerald: "bg-emerald-50/90 border-emerald-300 text-emerald-950 hover:bg-emerald-100",
+                sky: "bg-sky-50/90 border-sky-300 text-sky-950 hover:bg-sky-100",
+                rose: "bg-rose-50/90 border-rose-300 text-rose-950 hover:bg-rose-100",
+                yellow: "bg-yellow-50/90 border-yellow-300 text-yellow-950 hover:bg-yellow-100",
+                cyan: "bg-cyan-100 border-cyan-400 text-cyan-950 hover:bg-cyan-200",
+                indigo: "bg-indigo-100 border-indigo-400 text-indigo-950",
+                violet: "bg-violet-100 border-violet-400 text-violet-950",
+                pink: "bg-pink-100 border-pink-400 text-pink-950"
+            };
+
+            for (let i = 0; i < TOTAL_SPACES; i++) {
+                const space = spaceTemplates[i];
+                let row, col;
+
+                if (i <= 10) {
+                    row = 11;
+                    col = 11 - i;
+                } else if (i <= 20) {
+                    row = 11 - (i - 10);
+                    col = 1;
+                } else if (i <= 30) {
+                    row = 1;
+                    col = 1 + (i - 20);
+                } else {
+                    row = 1 + (i - 30);
+                    col = 11;
+                }
+
+                const tileDiv = document.createElement('div');
+                tileDiv.id = `tile-${i}`;
+                tileDiv.style.gridRow = row;
+                tileDiv.style.gridColumn = col;
+
+                const isCorner = (i % 10 === 0);
+                let tileStyle = sideThemeStyles[space.color] || "bg-white border-slate-300 text-slate-800";
+                let isOwnedTile = false;
+                
+                if (propertyOwners[i]) {
+                    const ownerP = players.find(p => p.id === propertyOwners[i].ownerId);
+                    if (ownerP) {
+                        tileStyle = tokenColors[ownerP.id].tileBg;
+                        isOwnedTile = true;
+                    }
+                }
+
+                tileDiv.className = `relative flex flex-col items-center justify-between p-0.5 border-2 rounded-lg overflow-hidden min-w-0 transition-all duration-300 ${tileStyle} ${isCorner ? 'ring-2 ring-amber-400 shadow-sm font-bold' : ''}`;
+
+                let bldgBadge = '';
+                if (propertyOwners[i] && propertyOwners[i].buildings > 0 && space.type === 'city') {
+                    const st = propertyOwners[i].buildings;
+                    const hex = OWNER_HEX[propertyOwners[i].ownerId % 4];
+                    const anim = !!(justBuilt && justBuilt.tile === i);
+                    bldgBadge = `<div class="absolute left-0 right-0 pointer-events-none" style="bottom:20%; height:44%; z-index:5;">${buildingSvg(st, hex, anim)}</div>`;
+                }
+
+                tileDiv.innerHTML = `
+                    ${bldgBadge}
+                    <div class="absolute inset-0 flex items-center justify-center ${isOwnedTile ? 'text-white/20' : 'text-slate-500/20'} pointer-events-none"><i class="fa-solid ${space.icon} tile-icon"></i></div>
+                    <div class="tile-name relative z-10">${space.name}</div>
+                    
+                    
+                    <div id="tokens-space-${i}" class="relative z-10 flex flex-wrap gap-0.5 justify-center items-center"></div>
+                    <div class="tile-price relative z-10 font-mono font-bold flex items-center justify-center gap-0.5 ${isOwnedTile ? 'text-white/90' : 'text-slate-600'}">${flagHtml(i)}${(space.type === 'city' || space.type === 'island') ? '₩' + space.price : ''}</div>
+                `;
+
+                boardEl.appendChild(tileDiv);
+            }
+            justBuilt = null;
+
+            renderPlayerTokens();
+        }
+
+        function renderPlayerTokens() {
+            for (let i = 0; i < TOTAL_SPACES; i++) {
+                const container = document.getElementById(`tokens-space-${i}`);
+                if (container) container.innerHTML = '';
+            }
+
+            players.forEach(p => {
+                if (p.bankrupt) return;
+                const container = document.getElementById(`tokens-space-${p.position}`);
+                if (container) {
+                    const tokenDot = document.createElement('div');
+                    tokenDot.className = `w-5 h-5 rounded-full ${tokenColors[p.id].bg} text-white text-[10px] flex items-center justify-center shadow-md ring-2 ${p.id === currentTurn ? 'ring-yellow-300 tk-turn' : 'ring-white'} transition`;
+                    tokenDot.innerHTML = tokenIconHtml(p.id);
+                    tokenDot.title = p.name;
+                    container.appendChild(tokenDot);
+                }
+            });
+
+            updatePlayerCardsUI();
+            updateInventoryUI();
+        }
+
+        function updatePlayerCardsUI() {
+            const list = document.getElementById('player-cards-list');
+            if (!list) return;
+            list.innerHTML = '';
+
+            players.forEach(p => {
+                const isCurrent = (p.id === currentTurn);
+                const colorObj = tokenColors[p.id];
+                list.innerHTML += `
+                    <div class="flex items-center justify-between p-2 rounded-2xl border ${isCurrent ? 'bg-amber-50 border-amber-400 ring-2 ring-amber-300' : 'bg-slate-50 border-slate-200'} transition">
+                        <div class="flex items-center gap-2">
+                            <span class="w-7 h-7 rounded-full ${colorObj.bg} text-white flex items-center justify-center text-xs shadow-xs" title="${shapeOf(p.id).name}">${tokenIconHtml(p.id)}</span>
+                            <div>
+                                <div class="text-xs font-bold text-slate-900 flex items-center gap-1">
+                                    ${p.name}
+                                    ${gameMode === 'online' && p.id === myId ? '<span class="text-[9px] text-amber-600 font-normal">(나)</span>' : ''}
+                                    ${p.bankrupt ? '<span class="text-[9px] text-red-600 font-normal">(파산)</span>' : ''}
+                                </div>
+                                <div class="text-[10px] text-slate-500">위치: ${flagHtml(p.position,12)} ${spaceTemplates[p.position].name} ${p.isIsland ? '🏝️(무인도)' : ''}</div>
+                            </div>
+                        </div>
+                        <div class="text-right">
+                            <div class="text-xs font-black text-amber-700 font-mono">₩${p.money}</div>
+                            <div class="text-[9px] text-slate-500">완주: ${p.laps}바퀴</div>
+                        </div>
+                    </div>
+                `;
+            });
+
+            const turnLabel = document.getElementById('current-turn-label');
+            if (turnLabel && players[currentTurn]) {
+                turnLabel.innerText = `현재 차례: ${players[currentTurn].name}${doubleStreak > 0 ? ` (더블 ${doubleStreak}회!)` : ''}`;
+                turnLabel.className = `text-sm font-bold ${tokenColors[currentTurn].text}`;
+            }
+            syncState();
+            refreshOnlineControls();
+        }
+
+        function updateInventoryUI() {
+            const invContainer = document.getElementById('my-property-inventory');
+            const countBadge = document.getElementById('my-property-count');
+            if (!invContainer) return;
+
+            invContainer.innerHTML = '';
+            
+            const activePlayer = (gameMode === 'online' && players[myId]) ? players[myId] : players[currentTurn];
+            if (!activePlayer) return;
+
+            const myProps = activePlayer.properties || [];
+            const myKeys = (inventoryCards[activePlayer.id] || []);
+            const totalItems = myProps.length + myKeys.length;
+
+            if (countBadge) countBadge.innerText = `${totalItems}개`;
+
+            if (totalItems === 0) {
+                invContainer.innerHTML = `<div class="text-[11px] text-slate-400 italic text-center py-3">보유한 자산 및 열쇠가 없습니다.</div>`;
+                return;
+            }
+
+            myProps.forEach(spaceId => {
+                const sp = spaceTemplates[spaceId];
+                const ownedObj = propertyOwners[spaceId] || { buildings: 0 };
+                invContainer.innerHTML += `
+                    <div onclick="openPropertyCardModal(${spaceId})" class="flex items-center justify-between p-2 rounded-xl bg-slate-50 border border-slate-200 hover:border-amber-400 cursor-pointer transition">
+                        <div class="flex items-center gap-2">
+                            <i class="fa-solid ${sp.icon} text-amber-600 text-xs"></i>
+                            <span class="text-xs font-bold text-slate-800 flex items-center gap-1.5">${flagHtml(spaceId,16)}${sp.name}</span>
+                        </div>
+                        <div class="text-[10px] text-slate-500">
+                            ${sp.type === 'island' ? '🌴 휴양지 | <span class="text-cyan-700 font-mono font-bold">₩' + resortRange(sp)[0] + '~' + resortRange(sp)[1] + '</span>' : (buildingIcons(ownedObj.buildings) || '🌱') + ' ' + BUILD_STAGES[ownedObj.buildings].label + ' | <span class="text-amber-700 font-mono font-bold">₩' + cityToll(sp, ownedObj) + '</span>'}
+                        </div>
+                    </div>
+                `;
+            });
+
+            myKeys.forEach((key, idx) => {
+                const canUse = (globalTurnCount > key.turnAcquired) && (gameMode === 'local' || activePlayer.id === currentTurn);
+                invContainer.innerHTML += `
+                    <div class="flex items-center justify-between p-2 rounded-xl bg-yellow-50 border border-yellow-300 transition">
+                        <div class="flex items-center gap-2">
+                            <i class="fa-solid fa-key text-yellow-600 text-xs"></i>
+                            <div>
+                                <div class="text-xs font-bold text-yellow-900">${key.name}</div>
+                                <div class="text-[9px] text-slate-500">${key.desc}</div>
+                            </div>
+                        </div>
+                        ${key.name === '우대권' ? `<span class="text-[9px] text-emerald-600 font-bold">통행료 낼 때 사용 선택</span>` : canUse ? `<button onclick="useGoldenKeyItem(${idx})" class="bg-yellow-500 hover:bg-yellow-400 text-slate-950 text-[10px] font-bold px-2 py-1 rounded-lg shadow-xs">사용</button>` : `<span class="text-[9px] text-slate-400">보관 중</span>`}
+                    </div>
+                `;
+            });
+        }
+
+        // Dice Rolling with Double Handlers
+        function rollDice() {
+            if (!gameActive || diceRolledThisTurn || isMoving || pendingAction || !canAct()) return;
+
+            const player = players[currentTurn];
+            if (!player || player.bankrupt) return;
+
+            // Island Rule Check
+            if (player.isIsland) {
+                const d1 = Math.floor(Math.random() * 6) + 1;
+                const d2 = Math.floor(Math.random() * 6) + 1;
+                addLog(`[무인도] ${player.name}님이 주사위를 굴렸습니다: (${d1}, ${d2})`);
+                sendFx('dice_result', { name: player.name, d1, d2, island: true });
+                
+                if (d1 === d2) {
+                    player.isIsland = false;
+                    player.islandTurns = 0;
+                    addLog(`🎉 더블(${d1}, ${d2}) 탈출 성공! 다음 턴부터 정상 이동합니다.`);
+                    showDoubleEffect('무인도 탈출 성공! 다음 턴부터 정상 이동', { dice: [d1, d2], title: '탈출 성공', eyebrow: '무인도', sub: '더블로 무인도를 벗어났어요', streak: 0 });
+                } else {
+                    player.islandTurns++;
+                    if (player.islandTurns >= 2) {
+                        player.isIsland = false;
+                        player.islandTurns = 0;
+                        addLog(`⛵ 2회 휴식 완료! 무인도를 탈출했습니다.`);
+                    } else {
+                        addLog(`🏝️ 탈출 실패. (남은 휴식: ${2 - player.islandTurns}회)`);
+                    }
+                }
+                diceRolledThisTurn = true;
+                updatePlayerCardsUI();
+                return;
+            }
+
+            const btnRoll = document.getElementById('btn-roll');
+            if (btnRoll) btnRoll.disabled = true;
+            isMoving = true;
+
+            const animOverlay = document.getElementById('dice-animation-overlay');
+            document.getElementById('dice-anim-title').innerText = '주사위 굴리는 중...';
+            document.getElementById('dice-result-title').innerText = '주사위 결과 확인';
+            if (animOverlay) animOverlay.classList.remove('hidden');
+            sendFx('dice_start', { name: player.name });
+
+            let count = 0;
+            const animInterval = setInterval(() => {
+                document.getElementById('anim-dice-1').innerText = Math.floor(Math.random() * 6) + 1;
+                document.getElementById('anim-dice-2').innerText = Math.floor(Math.random() * 6) + 1;
+                count++;
+                if (count > 10) {
+                    clearInterval(animInterval);
+                    const finalD1 = Math.floor(Math.random() * 6) + 1;
+                    const finalD2 = Math.floor(Math.random() * 6) + 1;
+                    const isDouble = (finalD1 === finalD2);
+                    const totalMove = finalD1 + finalD2;
+
+                    if (animOverlay) animOverlay.classList.add('hidden');
+                    sendFx('dice_result', { name: player.name, d1: finalD1, d2: finalD2 });
+
+                    document.getElementById('res-dice-1').innerText = finalD1;
+                    document.getElementById('res-dice-2').innerText = finalD2;
+                    document.getElementById('res-total-text').innerText = `총합: ${totalMove} ${isDouble ? '(더블 획득!)' : ''}`;
+                    const resOverlay = document.getElementById('dice-result-overlay');
+                    if (resOverlay) resOverlay.classList.remove('hidden');
+
+                    setTimeout(() => {
+                        if (resOverlay) resOverlay.classList.add('hidden');
+
+                        if (isDouble) {
+                            doubleStreak++;
+                            addLog(`⚡ 더블 발생! (${finalD1}, ${finalD2}) - 연속 ${doubleStreak}회`);
+                            
+                            // 3 consecutive doubles rule: Forced Island!
+                            if (doubleStreak >= 3) {
+                                addLog(`🚨 연속 3회 더블! 속도 위반으로 무인도(10번)로 강제 이동합니다!`);
+                                showToast(`🚨 연속 3회 더블! 무인도 수감`);
+                                player.position = 10; isMoving = false;
+                                player.isIsland = true;
+                                player.islandTurns = 0;
+                                doubleStreak = 0;
+                                diceRolledThisTurn = true;
+                                renderPlayerTokens();
+                                return;
+                            }
+                            
+                            showDoubleEffect('주사위를 한 번 더 굴리세요!', { dice: [finalD1, finalD2], streak: doubleStreak });
+                            diceRolledThisTurn = false; // Allow rolling again on double!
+                        } else {
+                            doubleStreak = 0;
+                            diceRolledThisTurn = true;
+                        }
+
+                        movePlayerSteps(player, totalMove);
+                    }, 1200);
+                }
+            }, 80);
+        }
+
+        let doubleEffectTimer = null;
+        function showDoubleEffect(msg, opts) {
+            opts = opts || {};
+            const overlay = document.getElementById('double-effect-overlay');
+            if (!overlay) return;
+            const streak = opts.streak || 0;
+            if (!opts._remote) sendFx('double', { msg: msg, opts: opts, who: (players[currentTurn] || {}).name });
+            const titles = ['더블!', '더블!', '더블 연속!'];
+            const eyebrows = ['보너스 턴', '보너스 턴', '주의'];
+            const title = opts.title || titles[Math.min(streak, 2)] || '더블!';
+            const eyebrow = opts.eyebrow || eyebrows[Math.min(streak, 2)];
+
+            document.getElementById('dbl-title').innerText = title;
+            document.getElementById('dbl-eyebrow').innerText = eyebrow;
+            document.getElementById('double-count-text').innerText = opts.sub || msg;
+            const dice = opts.dice;
+            document.getElementById('dbl-dice').style.display = dice ? 'flex' : 'none';
+            if (dice) {
+                document.getElementById('dbl-die-1').innerText = dice[0];
+                document.getElementById('dbl-die-2').innerText = dice[1];
+            }
+            let streakText = '';
+            if (streak >= 2) streakText = '연속 ' + streak + '회째 · 한 번 더 나오면 무인도로 이동해요';
+            else if (streak === 1) streakText = '보너스 턴을 얻었어요';
+            document.getElementById('dbl-streak').innerText = streakText;
+
+            overlay.classList.add('hidden');
+            void overlay.offsetWidth; // 애니메이션 재시작
+            overlay.classList.remove('hidden');
+            clearTimeout(doubleEffectTimer);
+            doubleEffectTimer = setTimeout(() => overlay.classList.add('hidden'), 1800);
+        }
+
+        function endTurn(force) {
+            if (!gameActive || (!force && (!canAct() || pendingAction))) return;
+            pendingAction = false;
+            diceRolledThisTurn = false;
+            doubleStreak = 0;
+            
+            do {
+                currentTurn = (currentTurn + 1) % players.length;
+            } while (players[currentTurn].bankrupt);
+
+            globalTurnCount++;
+            const btnRoll = document.getElementById('btn-roll');
+            if (btnRoll) btnRoll.disabled = false;
+
+            addLog(`➡️ ${players[currentTurn].name}님의 턴입니다.`);
+            setTimeout(() => { syncState(true); refreshOnlineControls(); }, 0);
+            updatePlayerCardsUI();
+            updateInventoryUI();
+        }
+
+        function movePlayerSteps(player, steps) {
+            let currentStep = 0;
+            const stepInterval = setInterval(() => {
+                player.position = (player.position + 1) % TOTAL_SPACES;
+                if (player.position === 0) {
+                    player.laps++;
+                    player.money += 300;
+                    addLog(`🏁 ${player.name}님이 출발지를 지나며 월급 ₩300을 수령했습니다! (총 ${player.laps}바퀴 완주)`);
+                }
+                renderPlayerTokens();
+                currentStep++;
+
+                if (currentStep >= steps) {
+                    clearInterval(stepInterval);
+                    handleSpaceAction(player);
+                    isMoving = false;
+                    { const b = document.getElementById('btn-roll'); if (b && !diceRolledThisTurn && canAct()) b.disabled = false; }
+                    updatePlayerCardsUI();
+                }
+            }, 250);
+        }
+
+        function handleSpaceAction(player) {
+            const space = spaceTemplates[player.position];
+            addLog(`📍 ${player.name}님이 [${space.name}] 칸에 도착했습니다.`);
+
+            if (space.type === 'start') {
+                // Start space
+            } else if (space.type === 'island') {
+                // 휴양지: 무인도 효과 없음 / 땅 구매 가능 / 건물 불가 / 통행료 땅값의 0.5~1.5배
+                const ownerInfo = propertyOwners[player.position];
+                const [lo, hi] = resortRange(space);
+                if (!ownerInfo) {
+                    if (player.money >= space.price) {
+                        openActionModal(
+                            `🌴 휴양지 구매: ${space.name}`,
+                            `땅값: ₩${space.price}<br>통행료: 땅값의 0.5~1.5배 (₩${lo} ~ ₩${hi}, 밟을 때마다 변동)<br><span class="text-cyan-700 font-bold">※ 휴양지에는 건물을 지을 수 없습니다.</span><br>이 휴양지를 구매하시겠습니까?`,
+                            [
+                                { text: '구매하기', bg: 'bg-cyan-500 hover:bg-cyan-400 text-slate-950', action: () => buyProperty(player, space.id) },
+                                { text: '취소', bg: 'bg-slate-200 hover:bg-slate-300 text-slate-800', action: closeModal }
+                            ]
+                        );
+                    } else {
+                        addLog(`💰 ${player.name}님이 자금이 부족하여 ${space.name}을(를) 구매할 수 없습니다.`);
+                    }
+                } else if (ownerInfo.ownerId === player.id) {
+                    addLog(`🌴 내 소유의 휴양지 ${space.name}에서 휴식합니다. (휴양지에는 건물을 지을 수 없습니다)`);
+                } else {
+                    const owner = players.find(p => p.id === ownerInfo.ownerId);
+                    const toll = rollResortToll(space);
+                    settleToll(player, owner, toll.fee,
+                        `🌴 ${player.name}님이 ${owner ? owner.name : '다른 플레이어'}의 휴양지 이용료 ₩${toll.fee}를 지불했습니다. (땅값의 ${toll.mult.toFixed(1)}배)`,
+                        space.id);
+                }
+            } else if (space.type === 'corner_island') {
+                player.isIsland = true;
+                player.islandTurns = 0;
+                diceRolledThisTurn = true; doubleStreak = 0;
+                addLog(`⚓ ${player.name}님이 무인도에 갇혔습니다.`);
+            } else if (space.type === 'corner_space') {
+                // Space Travel destination picker
+                openSpaceTravelModal(player);
+            } else if (space.type === 'corner_welfare') {
+                player.money += 200;
+                addLog(`🎁 ${player.name}님이 사회복지기금에서 ₩200을 지원받았습니다!`);
+            } else if (space.type === 'gold') {
+                triggerGoldenKey(player);
+            } else if (space.type === 'city') {
+                const ownerInfo = propertyOwners[player.position];
+                if (!ownerInfo) {
+                    // Unowned city, prompt purchase
+                    if (player.money >= space.price) {
+                        openActionModal(
+                            `도시 구매: ${space.name}`,
+                            `가격: ₩${space.price} | 기본 통행료: ₩${space.rent}<br>건물: 별장(최대 2) → 빌딩(1) → 호텔(1)<br>이 도시를 구매하시겠습니까?`,
+                            [
+                                { text: '구매하기', bg: 'bg-amber-500 hover:bg-amber-400 text-slate-950', action: () => buyProperty(player, space.id) },
+                                { text: '취소', bg: 'bg-slate-200 hover:bg-slate-300 text-slate-800', action: closeModal }
+                            ]
+                        );
+                    } else {
+                        addLog(`💰 ${player.name}님이 자금이 부족하여 ${space.name}을(를) 구매할 수 없습니다.`);
+                    }
+                } else if (ownerInfo.ownerId === player.id) {
+                    // My property, check if laps >= 2 for upgrade
+                    if (player.laps >= 2) {
+                        const stage = ownerInfo.buildings || 0;
+                        if (stage >= MAX_STAGE) {
+                            addLog(`🏨 내 소유의 ${space.name}은(는) 이미 호텔까지 완공되었습니다!`);
+                        } else {
+                            const next = BUILD_STAGES[stage + 1];
+                            openActionModal(
+                                `건물 증축: ${space.name}`,
+                                `현재: ${buildingIcons(stage) || '🌱'} ${BUILD_STAGES[stage].label} (통행료 ₩${cityToll(space, ownerInfo)})<br>다음: <b>${next.label}</b> → 통행료 ₩${space.rent * next.mult}`,
+                                [
+                                    { text: `${next.label} 짓기 (₩${next.cost})`, bg: 'bg-amber-500 hover:bg-amber-400 text-slate-950', action: () => upgradeProperty(player, space.id) },
+                                    { text: '닫기', bg: 'bg-slate-200 hover:bg-slate-300 text-slate-800', action: closeModal }
+                                ]
+                            );
+                        }
+                    } else {
+                        addLog(`🏢 내 소유의 ${space.name}에 도착했습니다. (2바퀴 이상 완주 시 건물 증축 가능)`);
+                    }
+                } else {
+                    // Pay rent to other player
+                    const owner = players.find(p => p.id === ownerInfo.ownerId);
+                    const rentFee = cityToll(space, ownerInfo);
+                    settleToll(player, owner, rentFee,
+                        `💸 ${player.name}님이 ${owner ? owner.name : '다른 플레이어'}에게 통행료 ₩${rentFee}를 지불했습니다. (${buildingIcons(ownerInfo.buildings) || '🌱'} ${BUILD_STAGES[ownerInfo.buildings].label})`,
+                        space.id);
+                }
+            }
+            updatePlayerCardsUI();
+            updateInventoryUI();
+        }
+
+        function openSpaceTravelModal(player) {
+            const overlay = document.getElementById('space-travel-overlay');
+            const listEl = document.getElementById('space-travel-dest-list');
+            if (!overlay || !listEl) return;
+
+            listEl.innerHTML = '';
+            spaceTemplates.forEach((sp, idx) => {
+                if (idx === player.position) return;
+                const btn = document.createElement('button');
+                btn.className = "flex items-center justify-between p-2 rounded-xl bg-slate-50 border border-slate-200 hover:border-violet-500 hover:bg-violet-50 transition text-left";
+                btn.innerHTML = `
+                    <span class="text-xs font-bold text-slate-800 flex items-center gap-1.5">${flagHtml(idx,16)}${sp.name}</span>
+                    <span class="text-[10px] text-violet-600 font-mono">${idx}번 칸</span>
+                `;
+                btn.onclick = () => selectSpaceTravelDest(player, idx);
+                listEl.appendChild(btn);
+            });
+
+            overlay.classList.remove('hidden');
+            overlay.classList.add('flex');
+            addLog(`🚀 ${player.name}님이 우주여행 목적지를 선택하고 있습니다.`);
+        }
+
+        function selectSpaceTravelDest(player, destIndex) {
+            closeSpaceTravelModal();
+            
+            // Check if passing start
+            if (destIndex < player.position) {
+                player.laps++;
+                player.money += 300;
+                addLog(`🏁 출발지를 거쳐 월급 ₩300을 수령했습니다! (총 ${player.laps}바퀴 완주)`);
+            }
+
+            player.position = destIndex;
+            addLog(`🚀 ${player.name}님이 [${spaceTemplates[destIndex].name}] (으)로 우주여행을 완료했습니다!`);
+            renderPlayerTokens();
+            handleSpaceAction(player);
+        }
+
+        function closeSpaceTravelModal() {
+            const overlay = document.getElementById('space-travel-overlay');
+            if (overlay) {
+                overlay.classList.add('hidden');
+                overlay.classList.remove('flex');
+            }
+        }
+
+        function buyProperty(player, spaceId) {
+            const space = spaceTemplates[spaceId];
+            if (player.money >= space.price) {
+                player.money -= space.price;
+                propertyOwners[spaceId] = { ownerId: player.id, buildings: 0 };
+                if (!player.properties) player.properties = [];
+                player.properties.push(spaceId);
+                addLog(`🎉 ${player.name}님이 [${space.name}]을(를) 구매했습니다!`);
+                showToast(`🎉 ${space.name} 구매 완료!`);
+                renderBoard();
+            }
+            closeModal();
+        }
+
+        function upgradeProperty(player, spaceId) {
+            const space = spaceTemplates[spaceId];
+            const ownerInfo = propertyOwners[spaceId];
+            if (space.type !== 'city' || !ownerInfo || ownerInfo.ownerId !== player.id) { closeModal(); return; }
+            const stage = ownerInfo.buildings || 0;
+            if (stage >= MAX_STAGE) {
+                showToast('이미 호텔까지 완공되었습니다.');
+            } else {
+                const next = BUILD_STAGES[stage + 1];
+                if (player.money >= next.cost) {
+                    player.money -= next.cost;
+                    ownerInfo.buildings = stage + 1;
+                    justBuilt = { tile: spaceId, stage: stage + 1 };
+                    addLog(`🏗️ ${player.name}님이 ${space.name}에 ${next.label}을(를) 지었습니다! (통행료 ₩${space.rent * next.mult})`);
+                    showToast(`🏗️ ${next.label} 완공!`);
+                    renderBoard();
+                } else {
+                    showToast('자금이 부족합니다.');
+                }
+            }
+            closeModal();
+        }
+
+        function triggerGoldenKey(player) {
+            const RESORTS = spaceTemplates.filter(sp => sp.type === 'island').map(sp => sp.id);
+            const others = players.filter(p => !p.bankrupt && p.id !== player.id);
+            const mine = () => (player.properties || []).filter(id => spaceTemplates[id].type === 'city' && propertyOwners[id]);
+            const charge = amt => chargePlayer(player, amt, null, null, null);
+            const keys = [
+                { name: "복권 당첨", desc: "은행에서 ₩300을 받습니다.", type: "money", val: 300 },
+                { name: "연말 보너스", desc: "연말 보너스로 ₩200을 받습니다.", type: "money", val: 200 },
+                { name: "주식 대박", desc: "투자한 주식이 올라 ₩400을 받습니다.", type: "money", val: 400 },
+                { name: "여행 보조금", desc: "여행 장려금으로 ₩150을 받습니다.", type: "money", val: 150 },
+                { name: "과속 벌금", desc: "경찰서에 ₩150을 지불합니다.", type: "money", val: -150 },
+                { name: "병원비", desc: "갑자기 아파서 병원비 ₩200을 지불합니다.", type: "money", val: -200 },
+                { name: "자동차 수리비", desc: "자동차 수리비 ₩120을 지불합니다.", type: "money", val: -120 },
+                { name: "카드값 청구", desc: "지난달 카드값 ₩250이 청구됩니다.", type: "money", val: -250 },
+                { name: "생일 축하", type: "collect_each" },
+                { name: "생일 파티", type: "pay_each" },
+                { name: "무인도 탈출권", desc: "무인도에서 즉시 탈출할 수 있는 카드입니다.", type: "item", keepable: true },
+                { name: "우대권", desc: "통행료를 내야 할 때 사용하면 1회 면제받습니다. (사용 여부는 직접 선택)", type: "item", keepable: true },
+                { name: "한 번 더!", desc: "주사위를 한 번 더 굴릴 수 있습니다.", type: "extra_roll" },
+                { name: "무료 건축 지원", type: "free_build" },
+                { name: "부동산 호황", type: "prop_bonus" },
+                { name: "재산세", type: "prop_tax" },
+                { name: "태풍 피해", type: "typhoon" },
+                { name: "세금 징수", type: "tax" },
+                { name: "출발지 직행", desc: "즉시 출발지로 이동하고 월급 ₩300을 받습니다.", type: "move_start" },
+                { name: "앞으로 이동", type: "move_rel", dir: 1 },
+                { name: "뒤로 이동", type: "move_rel", dir: -1 },
+                { name: "휴양지 여행", type: "move_resort" },
+                { name: "사회복지기금으로", desc: "사회복지기금 칸으로 이동합니다. 도착하면 지원금 ₩200!", type: "move_to", dest: 30 },
+                { name: "우주여행 초대", desc: "우주여행 칸으로 이동합니다. 원하는 곳으로 떠나보세요!", type: "move_to", dest: 20 },
+                { name: "무인도 직행", desc: "무인도로 이동합니다. (월급 없음)", type: "move_to", dest: 10, pass: false },
+                { name: "파리 여행", desc: "파리 칸으로 이동합니다.", type: "move_to", dest: 19 },
+                { name: "뉴욕 출장", desc: "뉴욕 칸으로 이동합니다.", type: "move_to", dest: 23 },
+                { name: "서울 방문", desc: "서울 칸으로 이동합니다.", type: "move_to", dest: 29 },
+                { name: "도쿄 벚꽃 여행", desc: "도쿄 칸으로 이동합니다.", type: "move_to", dest: 31 }
+            ];
+            const k = Object.assign({}, keys[Math.floor(Math.random() * keys.length)]);
+            let after = null; // 연출 뒤 실행할 이동
+
+            if (k.type === "money") {
+                if (k.val > 0) player.money += k.val; else charge(-k.val);
+            } else if (k.type === "collect_each") {
+                let got = 0;
+                others.forEach(o => { const a = Math.min(50, Math.max(0, o.money)); o.money -= a; got += a; });
+                player.money += got;
+                k.desc = `생일을 맞아 다른 플레이어에게 ₩50씩 축하금을 받습니다. (총 ₩${got})`;
+            } else if (k.type === "pay_each") {
+                const total = 50 * others.length;
+                k.desc = `생일 파티를 열어 다른 플레이어에게 ₩50씩 선물합니다. (총 ₩${total})`;
+                chargePlayer(player, total, null, null, () => { if (!player.bankrupt) others.forEach(o => { o.money += 50; }); });
+            } else if (k.type === "move_start") {
+                player.position = 0;
+                player.laps++;
+                player.money += 300;
+                renderPlayerTokens();
+            } else if (k.type === "item") {
+                if (!inventoryCards[player.id]) inventoryCards[player.id] = [];
+                inventoryCards[player.id].push({ name: k.name, desc: k.desc, turnAcquired: globalTurnCount });
+            } else if (k.type === "extra_roll") {
+                diceRolledThisTurn = false;
+                const b = document.getElementById('btn-roll'); if (b && canAct()) b.disabled = false;
+            } else if (k.type === "free_build") {
+                const open = mine().filter(id => (propertyOwners[id].buildings || 0) < MAX_STAGE);
+                if (open.length) {
+                    const id = open[Math.floor(Math.random() * open.length)], info = propertyOwners[id];
+                    info.buildings = (info.buildings || 0) + 1;
+                    justBuilt = { tile: id, stage: info.buildings };
+                    k.desc = `${spaceTemplates[id].name}에 ${BUILD_STAGES[info.buildings].label}을(를) 무료로 지어 드립니다!`;
+                    renderBoard();
+                } else { player.money += 100; k.desc = "무료로 지을 수 있는 내 도시가 없어 대신 ₩100을 받습니다."; }
+            } else if (k.type === "prop_bonus") {
+                const n = (player.properties || []).length;
+                player.money += n * 30;
+                k.desc = n ? `부동산 호황! 보유 땅 ${n}곳 × ₩30 = ₩${n * 30}을 받습니다.` : "보유한 땅이 없어 혜택이 없습니다.";
+            } else if (k.type === "prop_tax") {
+                const n = (player.properties || []).length;
+                k.desc = n ? `보유 땅 ${n}곳 × ₩30 = ₩${n * 30}의 재산세를 냅니다.` : "보유한 땅이 없어 재산세가 면제됩니다.";
+                if (n) charge(n * 30);
+            } else if (k.type === "typhoon") {
+                const built = mine().filter(id => (propertyOwners[id].buildings || 0) > 0);
+                if (built.length) {
+                    const id = built[Math.floor(Math.random() * built.length)];
+                    propertyOwners[id].buildings--;
+                    k.desc = `${spaceTemplates[id].name}의 건물이 태풍 피해로 한 단계 줄었습니다.`;
+                    renderBoard();
+                } else k.desc = "다행히 태풍 피해를 입은 건물이 없습니다.";
+            } else if (k.type === "move_rel") {
+                const steps = 2 + Math.floor(Math.random() * 4); // 2~5칸
+                const dest = (player.position + k.dir * steps + TOTAL_SPACES) % TOTAL_SPACES;
+                const passes = k.dir > 0 && (player.position + steps >= TOTAL_SPACES);
+                k.desc = k.dir > 0
+                    ? `앞으로 ${steps}칸 이동합니다.${passes ? ' (출발지를 지나 월급 ₩300!)' : ''}`
+                    : `뒤로 ${steps}칸 이동합니다.`;
+                after = () => keyMove(player, dest, passes);
+            } else if (k.type === "move_resort") {
+                const choices = RESORTS.filter(id => id !== player.position);
+                const dest = choices[Math.floor(Math.random() * choices.length)];
+                k.desc = `휴양지 [${spaceTemplates[dest].name}] 칸으로 이동합니다.`;
+                after = () => keyMove(player, dest, true);
+            } else if (k.type === "move_to") {
+                after = () => keyMove(player, k.dest, k.pass !== false);
+            } else if (k.type === "tax") {
+                let v = 0, b = 0, h = 0;
+                (player.properties || []).forEach(id => {
+                    const sp = spaceTemplates[id], info = propertyOwners[id];
+                    if (!sp || sp.type !== 'city' || !info) return;
+                    const st = info.buildings || 0;
+                    v += Math.min(st, 2); if (st >= 3) b++; if (st >= 4) h++;
+                });
+                const tax = v * 40 + b * 100 + h * 200;
+                if (tax > 0) {
+                    k.desc = `보유 건물에 세금이 부과됩니다. 별장 ${v}개×₩40 + 빌딩 ${b}개×₩100 + 호텔 ${h}개×₩200 = ₩${tax} 납부`;
+                    charge(tax);
+                } else {
+                    k.desc = "보유한 건물이 없어 세금이 면제됩니다. 😮‍💨";
+                }
+            }
+
+            showGoldenKeyOverlay(k.name, k.desc, null);
+            sendFx('key', { who: player.name, name: k.name, desc: k.desc });
+            addLog(`🔑 황금열쇠 당첨: [${k.name}] - ${k.desc}`);
+            updatePlayerCardsUI();
+            updateInventoryUI();
+            if (after) after();
+        }
+
+        function closeGoldenKeyModal() {
+            gkRemote = false; clearTimeout(gkRemoteTimer);
+            const overlay = document.getElementById('golden-key-overlay');
+            if (overlay) overlay.classList.add('hidden');
+        }
+
+        function useGoldenKeyItem(itemIdx) {
+            const activePlayer = (gameMode === 'online' && players[myId]) ? players[myId] : players[currentTurn];
+            if (!inventoryCards[activePlayer.id] || !inventoryCards[activePlayer.id][itemIdx]) return;
+            const item = inventoryCards[activePlayer.id][itemIdx];
+
+            if (item.name === "무인도 탈출권") {
+                activePlayer.isIsland = false;
+                activePlayer.islandTurns = 0;
+                addLog(`✨ ${activePlayer.name}님이 [무인도 탈출권]을 사용하여 즉시 탈출했습니다!`);
+                showToast(`✨ 무인도 탈출 성공!`);
+            }
+            inventoryCards[activePlayer.id].splice(itemIdx, 1);
+            updateInventoryUI();
+            syncState();
+        }
+
+        function openActionModal(title, desc, actions) {
+            const modal = document.getElementById('action-modal');
+            const titleEl = document.getElementById('modal-title');
+            const descEl = document.getElementById('modal-desc');
+            const actsEl = document.getElementById('modal-actions');
+            if (!modal || !titleEl || !descEl || !actsEl) return;
+
+            titleEl.innerText = title;
+            descEl.innerHTML = desc;
+            actsEl.innerHTML = '';
+
+            actions.forEach(act => {
+                const btn = document.createElement('button');
+                btn.className = `py-2.5 rounded-xl font-bold text-xs shadow transition ${act.bg}`;
+                btn.innerText = act.text;
+                if (act.full) btn.classList.add('col-span-2');
+                btn.onclick = act.action;
+                actsEl.appendChild(btn);
+            });
+
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function closeModal() {
+            const modal = document.getElementById('action-modal');
+            if (modal) {
+                modal.classList.add('hidden');
+                modal.classList.remove('flex');
+            }
+        }
+
+        function openPropertyCardModal(spaceId) {
+            const space = spaceTemplates[spaceId];
+            const ownerInfo = propertyOwners[spaceId] || { buildings: 0 };
+            const titleEl = document.getElementById('pc-modal-title');
+            const bodyEl = document.getElementById('pc-modal-body');
+            const actsEl = document.getElementById('pc-modal-actions');
+            const modal = document.getElementById('property-card-modal');
+            if (!modal || !titleEl || !bodyEl) return;
+
+            titleEl.innerText = `${space.type === 'island' ? '휴양지' : '도시'} 자산 카드: ${space.name}`;
+            if (space.type === 'island') {
+                const [lo, hi] = resortRange(space);
+                bodyEl.innerHTML = `
+                    <div>🌴 휴양지 땅값: <span class="font-mono font-bold text-cyan-600">₩${space.price}</span></div>
+                    <div>통행료: <span class="font-mono font-bold text-red-600">₩${lo} ~ ₩${hi}</span> <span class="text-slate-500">(땅값의 0.5~1.5배, 방문 시마다 변동)</span></div>
+                    <div class="text-slate-500">휴양지에는 건물을 지을 수 없습니다.</div>
+                `;
+            } else {
+                const st = ownerInfo.buildings || 0;
+                const nxt = BUILD_STAGES[st + 1];
+                bodyEl.innerHTML = `
+                    <div>도시 가격: <span class="font-mono font-bold text-amber-600">₩${space.price}</span></div>
+                    <div>기본 통행료: <span class="font-mono font-bold">₩${space.rent}</span></div>
+                    <div>건설 현황: <span class="font-mono font-bold">${buildingIcons(st) || '🌱'} ${BUILD_STAGES[st].label}</span></div>
+                    <div>현재 총 통행료: <span class="font-mono font-bold text-red-600">₩${cityToll(space, ownerInfo)}</span></div>
+                    <div class="text-slate-500">${nxt ? '다음 단계: ' + nxt.label + ' (₩' + nxt.cost + ') → 통행료 ₩' + space.rent * nxt.mult : '최고 단계(호텔) 완공!'}</div>
+                `;
+            }
+            actsEl.innerHTML = `<button onclick="closePropertyCardModal()" class="w-full col-span-2 bg-slate-800 text-white font-bold py-2.5 rounded-xl text-xs">확인</button>`;
+
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function closePropertyCardModal() {
+            const modal = document.getElementById('property-card-modal');
+            if (modal) modal.classList.add('hidden');
+        }
+
+        function checkBankrupt(player) {
+            if (player.money < 0) {
+                player.bankrupt = true;
+                (player.properties || []).forEach(id => delete propertyOwners[id]);
+                player.properties = [];
+                renderBoard();
+                setTimeout(checkGameOver, 0);
+                addLog(`💀 ${player.name}님이 파산했습니다!`);
+                showToast(`💀 ${player.name} 파산!`);
+            }
+        }
+
+        function addLog(msg) {
+            const logs = document.getElementById('game-logs');
+            if (!logs) return;
+            const item = document.createElement('div');
+            item.className = "text-slate-300 border-b border-slate-800/40 pb-0.5";
+            item.innerText = msg;
+            logs.appendChild(item);
+            if (gameMode === 'online' && !isRemote && gameActive && socket && socket.connected) socket.emit('log', msg);
+            logs.scrollTop = logs.scrollHeight;
+        }
+
+        function clearLogs() {
+            const logs = document.getElementById('game-logs');
+            if (logs) logs.innerHTML = '';
+        }
+
+        function showToast(msg) {
+            const box = document.getElementById('toast-box');
+            const msgEl = document.getElementById('toast-msg');
+            if (!box || !msgEl) return;
+            msgEl.innerText = msg;
+            box.classList.remove('opacity-0', 'pointer-events-none');
+            setTimeout(() => {
+                box.classList.add('opacity-0', 'pointer-events-none');
+            }, 2500);
+        }
+
+        // ===== Online multiplayer (Socket.IO) =====
+        // 방식: 현재 차례인 플레이어의 브라우저가 게임 로직을 실행하고, 변경된 상태를 서버가 방 전체에 중계합니다.
+        let socket = null, myId = -1, roomCode = '', isRemote = false, isMoving = false;
+        const clientId = Math.random().toString(36).slice(2) + Date.now().toString(36);
+        const onlineName = () => (document.getElementById('online-pname').value.trim() || '여행자').slice(0, 12);
+
+        function canAct() { return gameMode !== 'online' || (myId >= 0 && currentTurn === myId); }
+
+        function refreshOnlineControls() {
+            if (gameMode !== 'online' || !gameActive) return;
+            const r = document.getElementById('btn-roll'), e = document.getElementById('btn-end-turn');
+            if (r) r.disabled = !(canAct() && !diceRolledThisTurn && !isMoving);
+            if (e) e.disabled = !canAct() || isMoving;
+            const b = document.getElementById('game-status-banner');
+            if (b && players[currentTurn]) b.innerText = canAct() ? '내 차례!' : `${players[currentTurn].name}님 차례`;
+        }
+
+        function syncState(force) {
+            if (gameMode !== 'online' || isRemote || !socket || !socket.connected) return;
+            if (!force && (!gameActive || currentTurn !== myId)) return;
+            socket.emit('state', { players, currentTurn, propertyOwners, inventoryCards, doubleStreak, globalTurnCount, diceRolledThisTurn, gameActive, tokenShapes });
+        }
+
+        function applyRemoteState(st) {
+            const wasActive = gameActive;
+            isRemote = true;
+            try {
+                if (st.tokenShapes) Object.assign(tokenShapes, st.tokenShapes);
+                players = st.players; currentTurn = st.currentTurn; propertyOwners = st.propertyOwners;
+                inventoryCards = st.inventoryCards; doubleStreak = st.doubleStreak;
+                globalTurnCount = st.globalTurnCount; diceRolledThisTurn = st.diceRolledThisTurn; gameActive = st.gameActive;
+                renderBoard();
+                refreshOnlineControls();
+                if (wasActive && !gameActive) showToast('🏆 게임이 종료되었습니다!');
+            } finally { isRemote = false; }
+        }
+
+        function checkGameOver() {
+            const alive = players.filter(p => !p.bankrupt);
+            if (gameActive && players.length > 1 && alive.length === 1) {
+                gameActive = false;
+                addLog(`🏆 ${alive[0].name}님이 최종 우승했습니다!`);
+                showToast(`🏆 ${alive[0].name} 우승!`);
+                syncState(true);
+            }
+        }
+
+        function connectSocket(cb) {
+            const url = document.getElementById('online-server-url').value.trim().replace(/\/+$/, '');
+            if (!/^https?:\/\//.test(url)) { showToast('서버 주소를 확인하세요 (https://...)'); return; }
+            if (socket && socket.io.uri === url) { socket.connected ? cb() : socket.once('connect', cb); return; }
+            if (socket) socket.disconnect();
+            showToast('서버 연결 중... (무료 Render는 최대 1분 걸릴 수 있어요)');
+            socket = io(url, { reconnection: true, timeout: 60000 });
+            socket.on('connect', () => { if (roomCode) socket.emit('rejoin', { code: roomCode, cid: clientId }); });
+            socket.on('connect_error', () => showToast('서버에 연결할 수 없습니다. 주소와 서버 상태를 확인하세요.'));
+            socket.on('err', m => showToast('⚠️ ' + m));
+            socket.on('gone', () => { roomCode = ''; myId = -1; document.getElementById('waiting-room-panel').classList.add('hidden'); showToast('방이 사라졌습니다. 다시 만들어 주세요.'); });
+            socket.on('joined', c => { roomCode = c; document.getElementById('waiting-room-panel').classList.remove('hidden'); document.getElementById('display-room-code').innerText = c; });
+            socket.on('room', renderWaiting);
+            socket.on('game_started', startOnlineGame);
+            socket.on('state', applyRemoteState);
+            socket.on('log', m => {
+                if (typeof m === 'string' && m.startsWith(FX_PREFIX)) { try { handleFx(JSON.parse(m.slice(FX_PREFIX.length))); } catch (e) {} return; }
+                isRemote = true; addLog(m); isRemote = false;
+            });
+            socket.on('player_left', onPlayerLeft);
+            socket.once('connect', cb);
+        }
+
+        function myShapeKey() { const el = document.getElementById('online-ptoken'); return el ? el.value : 'rocket'; }
+        function broadcastMyToken() { if (myId >= 0) { tokenShapes[myId] = myShapeKey(); sendFx('token', { id: myId, shape: tokenShapes[myId] }); } }
+        function createOnlineRoom() { connectSocket(() => socket.emit('create', { cid: clientId, name: onlineName(), token: myShapeKey() })); }
+
+        function joinOnlineRoom() {
+            const c = document.getElementById('online-room-code-input').value.trim().toUpperCase();
+            if (!c) { showToast('방 코드를 입력하세요'); return; }
+            connectSocket(() => socket.emit('join', { code: c, cid: clientId, name: onlineName(), token: myShapeKey() }));
+        }
+
+        function renderWaiting(room) {
+            if (gameActive && gameMode === 'online') return;
+            myId = room.me;
+            const ms = room.members;
+            broadcastMyToken();
+            document.getElementById('waiting-count').innerText = `${ms.length}/4명`;
+            document.getElementById('waiting-players-list').innerHTML = ms.map((m, i) =>
+                `<div class="flex items-center gap-2 text-xs text-slate-800"><span class="w-5 h-5 rounded-full ${tokenColors[i].bg} text-white text-[10px] font-bold flex items-center justify-center">${tokenIconHtml(i)}</span>${m.name}${i === 0 ? ' 👑' : ''}${i === myId ? ' (나)' : ''}</div>`).join('');
+            document.getElementById('btn-start-socket').classList.toggle('hidden', !(myId === 0 && ms.length >= 2));
+        }
+
+        function startSocketGameHost() { if (socket) socket.emit('start'); }
+
+        function startOnlineGame(m) {
+            gameMode = 'online'; playerCount = m.members.length;
+            players = m.members.map((x, i) => ({ id: i, name: x.name, money: 4000, position: 0, laps: 0, properties: [], isIsland: false, islandTurns: 0, bankrupt: false }));
+            gameActive = true; currentTurn = 0; globalTurnCount = 0; doubleStreak = 0;
+            diceRolledThisTurn = false; isMoving = false; propertyOwners = {}; inventoryCards = {};
+            document.getElementById('start-screen').classList.add('hidden');
+            document.getElementById('game-mode-badge').innerText = `온라인 (방 ${roomCode})`;
+            clearLogs();
+            broadcastMyToken();
+            setTimeout(broadcastMyToken, 600); setTimeout(broadcastMyToken, 2000);
+            renderBoard();
+            refreshOnlineControls();
+            addLog(`🚀 온라인 게임 시작! ${players[0].name}님의 차례입니다.`);
+        }
+
+        function onPlayerLeft(idx) {
+            if (gameMode !== 'online' || !gameActive || !players[idx] || players[idx].bankrupt) return;
+            players[idx].bankrupt = true;
+            (players[idx].properties || []).forEach(id => delete propertyOwners[id]);
+            players[idx].properties = [];
+            addLog(`🚪 ${players[idx].name}님의 연결이 끊어져 퇴장 처리되었습니다.`);
+            const alive = players.filter(p => !p.bankrupt);
+            isRemote = true; renderBoard(); isRemote = false;
+            if (alive.length && alive[0].id === myId) {
+                checkGameOver();
+                if (gameActive && currentTurn === idx) endTurn(true); else syncState(true);
+            }
+        }
+
+        // ===== 자동 턴 넘김: 주사위·이동·팝업이 모두 끝나면 다음 사람에게 =====
+        function anyModalOpen() {
+            return ['action-modal', 'space-travel-overlay', 'property-card-modal', 'golden-key-overlay', 'rules-modal', 'dice-animation-overlay', 'dice-result-overlay']
+                .some(id => { const el = document.getElementById(id); return el && !el.classList.contains('hidden'); });
+        }
+        let autoEndTicks = 0;
+        setInterval(() => {
+            const p = players[currentTurn];
+            if (!gameActive || isRemote || !p || !canAct() || isMoving || pendingAction || anyModalOpen() || !(p.bankrupt || diceRolledThisTurn)) { autoEndTicks = 0; return; }
+            if (++autoEndTicks >= 2) { autoEndTicks = 0; endTurn(p.bankrupt); }
+        }, 500);
+
+        function openRulesModal() {
+            document.getElementById('rules-modal').classList.remove('hidden');
+            document.getElementById('rules-modal').classList.add('flex');
+        }
+
+        function closeRulesModal() {
+            document.getElementById('rules-modal').classList.add('hidden');
+        }
+    </script>
+</body>
+</html>
